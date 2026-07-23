@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="2026 Fantasy Football Draft board, PyTorch Neural Network rank recalculator, and Fantasy2point0 Monte Carlo Playoff simulator.">
+    <title>Fantasy2point0 - 2026 Draft Suite & Simulator</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <!-- Background Gradient Glows -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <div class="app-container">
+        <!-- Sidebar: Fantasy2point0 Standings & Simulations -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">
+                    <i class="fa-solid fa-trophy"></i>
+                </div>
+                <div>
+                    <h2>Fantasy2.0</h2>
+                    <span class="sub-brand">2026 Draft & Simulator</span>
+                </div>
+            </div>
+
+            <!-- Standings Widget -->
+            <div class="widget card">
+                <div class="widget-header">
+                    <h3 class="widget-title"><i class="fa-solid fa-ranking-star"></i> Playoff Odds</h3>
+                    <button id="sim-btn" class="btn btn-secondary btn-icon-only" title="Run Monte Carlo Playoff Simulation">
+                        <i class="fa-solid fa-arrows-spin" id="sim-icon"></i>
+                    </button>
+                </div>
+                <div class="standings-list" id="standings-container">
+                    <!-- Standings entries injected here -->
+                    <div class="widget-placeholder">
+                        <p>Draft players to teams to run the playoff simulation.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Google Drive Export Card -->
+            <div class="widget card export-widget">
+                <h3 class="widget-title"><i class="fa-brands fa-google-drive"></i> GCloud Export</h3>
+                <div class="export-body">
+                    <p class="export-tip">Export the current draft rosters directly to your Google Drive.</p>
+                    <div class="form-group">
+                        <label for="drive-folder-id">Folder ID (Optional):</label>
+                        <input type="text" id="drive-folder-id" placeholder="Google Drive Folder ID" aria-label="Drive Folder ID">
+                    </div>
+                    <button id="export-btn" class="btn btn-primary btn-block">
+                        <i class="fa-brands fa-google-drive"></i> Export Rosters
+                    </button>
+                    <div id="export-status" class="status-msg hidden"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Dashboard Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-info">
+                    <h1>2026 Draft Recalculator & Simulator</h1>
+                    <p class="subtitle">Emulating the Yahoo model using 20 years of stats & customizable O-line projections.</p>
+                </div>
+                <div class="header-actions">
+                    <div class="status-indicator">
+                        <span class="status-dot pulsed" id="status-dot"></span>
+                        <span id="status-text">Connected</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Navigation Tabs -->
+            <nav class="nav-tabs card">
+                <button class="tab-btn active" data-tab="cheat-sheet"><i class="fa-solid fa-clipboard-list"></i> 2026 Cheat Sheet</button>
+                <button class="tab-btn" data-tab="oline-tuner"><i class="fa-solid fa-sliders"></i> O-Line Tuning Station</button>
+                <button class="tab-btn" data-tab="draft-tracker"><i class="fa-solid fa-clipboard-question"></i> Draft Tracker</button>
+                <button class="tab-btn" data-tab="rosters"><i class="fa-solid fa-users"></i> Team Rosters</button>
+            </nav>
+
+            <!-- Loading overlay -->
+            <div class="status-overlay hidden" id="loading-state">
+                <div class="spinner-container">
+                    <div class="pulse-spinner"></div>
+                    <p id="loading-text">Generating 2026 Draft Cheat Sheet...</p>
+                </div>
+            </div>
+
+            <!-- Tab Content: 2026 Cheat Sheet -->
+            <section class="tab-content active" id="cheat-sheet-tab">
+                <!-- Toolbar filters -->
+                <div class="toolbar card">
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="search-input" placeholder="Search players (e.g. McCaffrey, Gibbs, Lamb)..." aria-label="Search players">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <span class="filter-label">Position:</span>
+                        <div class="filter-buttons">
+                            <button class="filter-btn active" data-pos="ALL">ALL</button>
+                            <button class="filter-btn" data-pos="QB">QB</button>
+                            <button class="filter-btn" data-pos="RB">RB</button>
+                            <button class="filter-btn" data-pos="WR">WR</button>
+                            <button class="filter-btn" data-pos="TE">TE</button>
+                            <button class="filter-btn filter-btn-sea" data-pos="SEA" style="background: rgba(0, 34, 68, 0.6); color: #69BE28; border: 1px solid #69BE28; font-weight: 700;"><i class="fa-solid fa-feather"></i> SEA</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Table Card -->
+                <div class="card table-card">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Player Name</th>
+                                    <th>Position</th>
+                                    <th>NFL Team</th>
+                                    <th class="text-right">Projected ADP</th>
+                                    <th class="text-right">2025 Pts (Half-PPR)</th>
+                                    <th class="text-right">O-Line Score</th>
+                                    <th class="text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cheat-sheet-tbody">
+                                <!-- Table rows injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: O-Line Tuning Station -->
+            <section class="tab-content" id="oline-tuner-tab">
+                <div class="card form-card">
+                    <div class="card-header-desc">
+                        <h2>Tweak Team O-Lines (2026 Projections)</h2>
+                        <p>Adjust specific teams' O-line quality scores. The PyTorch Neural Network will instantly re-evaluate rankings for all players on recalculate.</p>
+                    </div>
+                    <form id="oline-adjustments-form" class="oline-grid">
+                        <!-- Seattle -->
+                        <div class="form-group oline-slider-card" style="border: 1px solid #69BE28; background: rgba(0, 34, 68, 0.4);">
+                            <div class="oline-meta">
+                                <span class="oline-team" style="color: #69BE28;"><i class="fa-solid fa-feather"></i> SEA (Seahawks)</span>
+                                <span class="oline-val-display boosted" id="val-sea">Boosted (+1.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="SEA" min="-2.0" max="2.0" step="0.1" value="1.0">
+                        </div>
+
+                        <!-- Detroit -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> DET (Lions)</span>
+                                <span class="oline-val-display" id="val-det">Downgraded (-0.5)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="DET" min="-2.0" max="2.0" step="0.1" value="-0.5">
+                        </div>
+
+                        <!-- Miami -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> MIA (Dolphins)</span>
+                                <span class="oline-val-display" id="val-mia">Sucks (-1.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="MIA" min="-2.0" max="2.0" step="0.1" value="-1.0">
+                        </div>
+
+                        <!-- Indianapolis -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> IND (Colts)</span>
+                                <span class="oline-val-display" id="val-ind">Normal (0.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="IND" min="-2.0" max="2.0" step="0.1" value="0.0">
+                        </div>
+
+                        <!-- San Francisco -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> SF (49ers)</span>
+                                <span class="oline-val-display" id="val-sf">Normal (0.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="SF" min="-2.0" max="2.0" step="0.1" value="0.0">
+                        </div>
+
+                        <!-- LA Rams -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> LAR (Rams)</span>
+                                <span class="oline-val-display" id="val-lar">Normal (0.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="LAR" min="-2.0" max="2.0" step="0.1" value="0.0">
+                        </div>
+
+                        <!-- Cincinnati -->
+                        <div class="form-group oline-slider-card">
+                            <div class="oline-meta">
+                                <span class="oline-team"><i class="fa-solid fa-shield-halved"></i> CIN (Bengals)</span>
+                                <span class="oline-val-display" id="val-cin">Normal (0.0)</span>
+                            </div>
+                            <input type="range" class="oline-slider" data-team="CIN" min="-2.0" max="2.0" step="0.1" value="0.0">
+                        </div>
+                    </form>
+                    
+                    <div class="form-actions">
+                        <button id="recalc-btn" class="btn btn-primary"><i class="fa-solid fa-arrows-rotate"></i> Recalculate Rankings</button>
+                        <button id="reset-oline-btn" class="btn btn-secondary">Reset to Defaults</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: Draft Tracker -->
+            <section class="tab-content" id="draft-tracker-tab">
+                <div class="tracker-layout">
+                    <!-- Left: Draft Pick Form -->
+                    <div class="card form-card">
+                        <h2>Record a Draft Pick</h2>
+                        <p class="subtitle">Assign a player from the cheat sheet to a team in the Fantasy2point0 league.</p>
+                        
+                        <div class="draft-pick-inputs">
+                            <div class="form-group">
+                                <label for="draft-player-select">Select Player:</label>
+                                <select id="draft-player-select" class="form-select">
+                                    <option value="" disabled selected>Choose player...</option>
+                                    <!-- Options populated by JS -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="draft-team-select">Select League Team:</label>
+                                <select id="draft-team-select" class="form-select">
+                                    <option value="" disabled selected>Choose team...</option>
+                                    <!-- Options populated by JS -->
+                                </select>
+                            </div>
+                            <button id="submit-pick-btn" class="btn btn-primary btn-block">
+                                <i class="fa-solid fa-plus"></i> Submit Draft Pick
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Log of Picks -->
+                    <div class="card table-card log-card">
+                        <h2>Draft Log</h2>
+                        <p class="subtitle">Chronological record of completed picks in the 2026 draft.</p>
+                        <div class="draft-log-container">
+                            <ol class="draft-log" id="draft-log-list">
+                                <!-- Log items injected here -->
+                                <li class="log-placeholder">No picks recorded yet. Select a player and team above to begin the draft.</li>
+                            </ol>
+                        </div>
+                        <button id="clear-draft-btn" class="btn btn-secondary btn-block">
+                            <i class="fa-solid fa-trash-can"></i> Reset/Clear Draft
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: Team Rosters -->
+            <section class="tab-content" id="rosters-tab">
+                <div class="rosters-grid" id="rosters-container">
+                    <!-- Rosters of all 10 teams injected here -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
