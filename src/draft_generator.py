@@ -16,37 +16,37 @@ from src.preprocessing import load_draft_picks
 
 # List of top incoming 2026 rookie prospects (including Notre Dame RBs)
 ROOKIE_PROSPECTS_2026 = [
-    # Notre Dame Prospects
-    {'name': 'Jeremiyah Love', 'pos': 'RB', 'team': 'CHI', 'pick': 28, 'round': 1, 'college': 'Notre Dame'},
-    {'name': 'Audric Estime', 'pos': 'RB', 'team': 'DEN', 'pick': 147, 'round': 5, 'college': 'Notre Dame'},
-    {'name': 'Jeremiah Price', 'pos': 'RB', 'team': 'IND', 'pick': 115, 'round': 4, 'college': 'Notre Dame'},
+    # Notre Dame 2026 NFL Rookies (Entering Sept 2026)
+    {'name': 'Jeremiyah Love', 'pos': 'RB', 'team': 'CHI', 'pick': 24, 'round': 1, 'college': 'Notre Dame'},
+    {'name': 'Jeremiah Price', 'pos': 'RB', 'team': 'IND', 'pick': 110, 'round': 4, 'college': 'Notre Dame'},
+    {'name': 'Aneyas Williams', 'pos': 'RB', 'team': 'DET', 'pick': 120, 'round': 4, 'college': 'Notre Dame'},
+    {'name': 'Kedren Young', 'pos': 'RB', 'team': 'GB', 'pick': 135, 'round': 5, 'college': 'Notre Dame'},
     {'name': 'Mitchell Evans', 'pos': 'TE', 'team': 'GB', 'pick': 85, 'round': 3, 'college': 'Notre Dame'},
     
-    # Top Running Back Rookies
+    # Top 2026 NFL Draft Running Back Rookies
     {'name': 'Ashton Jeanty', 'pos': 'RB', 'team': 'DAL', 'pick': 12, 'round': 1, 'college': 'Boise State'},
     {'name': 'Quinshon Judkins', 'pos': 'RB', 'team': 'HOU', 'pick': 38, 'round': 2, 'college': 'Ohio State'},
     {'name': 'TreVeyon Henderson', 'pos': 'RB', 'team': 'NE', 'pick': 45, 'round': 2, 'college': 'Ohio State'},
     {'name': 'Ollie Gordon II', 'pos': 'RB', 'team': 'MIA', 'pick': 62, 'round': 2, 'college': 'Oklahoma State'},
     {'name': 'Omarion Hampton', 'pos': 'RB', 'team': 'LAC', 'pick': 35, 'round': 2, 'college': 'North Carolina'},
-    {'name': 'Kaleb Johnson', 'pos': 'RB', 'team': 'GB', 'pick': 50, 'round': 2, 'college': 'Iowa'},
     {'name': 'Nicholas Singleton', 'pos': 'RB', 'team': 'WAS', 'pick': 75, 'round': 3, 'college': 'Penn State'},
+    {'name': 'Kaleb Johnson', 'pos': 'RB', 'team': 'GB', 'pick': 50, 'round': 2, 'college': 'Iowa'},
     
-    # Top Wide Receiver Rookies
+    # Top 2026 NFL Draft Wide Receiver Rookies
     {'name': 'Travis Hunter', 'pos': 'WR', 'team': 'JAX', 'pick': 2, 'round': 1, 'college': 'Colorado'},
     {'name': 'Tetairoa McMillan', 'pos': 'WR', 'team': 'CAR', 'pick': 8, 'round': 1, 'college': 'Arizona'},
     {'name': 'Luther Burden III', 'pos': 'WR', 'team': 'NE', 'pick': 15, 'round': 1, 'college': 'Missouri'},
     {'name': 'Emeka Egbuka', 'pos': 'WR', 'team': 'KC', 'pick': 30, 'round': 1, 'college': 'Ohio State'},
     {'name': 'Elic Ayomanor', 'pos': 'WR', 'team': 'SF', 'pick': 40, 'round': 2, 'college': 'Stanford'},
     {'name': 'Isaiah Bond', 'pos': 'WR', 'team': 'BUF', 'pick': 48, 'round': 2, 'college': 'Texas'},
-    {'name': 'Tre Harris', 'pos': 'WR', 'team': 'ATL', 'pick': 55, 'round': 2, 'college': 'Ole Miss'},
 
-    # Top Quarterback Rookies
+    # Top 2026 NFL Draft Quarterback Rookies
     {'name': 'Cam Ward', 'pos': 'QB', 'team': 'NYG', 'pick': 5, 'round': 1, 'college': 'Miami'},
     {'name': 'Shedeur Sanders', 'pos': 'QB', 'team': 'LV', 'pick': 10, 'round': 1, 'college': 'Colorado'},
     {'name': 'Jaxson Dart', 'pos': 'QB', 'team': 'TEN', 'pick': 22, 'round': 1, 'college': 'Ole Miss'},
     {'name': 'Quinn Ewers', 'pos': 'QB', 'team': 'PIT', 'pick': 33, 'round': 2, 'college': 'Texas'},
 
-    # Top Tight End Rookies
+    # Top 2026 NFL Draft Tight End Rookies
     {'name': 'Colston Loveland', 'pos': 'TE', 'team': 'IND', 'pick': 25, 'round': 1, 'college': 'Michigan'},
     {'name': 'Tyler Warren', 'pos': 'TE', 'team': 'IND', 'pick': 42, 'round': 2, 'college': 'Penn State'}
 ]
