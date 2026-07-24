@@ -16,39 +16,28 @@ from src.preprocessing import load_draft_picks
 
 # List of top incoming 2026 rookie prospects (including Notre Dame RBs)
 ROOKIE_PROSPECTS_2026 = [
-    # Notre Dame 2026 NFL Rookies (Entering Sept 2026)
+    # Seattle Seahawks 2026 Rookie Spotlight
+    {'name': 'Jeremiah Price', 'pos': 'RB', 'team': 'SEA', 'pick': 32, 'round': 1, 'college': 'Notre Dame'},
+    
+    # Notre Dame 2026 College Prospects
     {'name': 'Jeremiyah Love', 'pos': 'RB', 'team': 'CHI', 'pick': 24, 'round': 1, 'college': 'Notre Dame'},
-    {'name': 'Jeremiah Price', 'pos': 'RB', 'team': 'IND', 'pick': 110, 'round': 4, 'college': 'Notre Dame'},
     {'name': 'Aneyas Williams', 'pos': 'RB', 'team': 'DET', 'pick': 120, 'round': 4, 'college': 'Notre Dame'},
     {'name': 'Kedren Young', 'pos': 'RB', 'team': 'GB', 'pick': 135, 'round': 5, 'college': 'Notre Dame'},
     {'name': 'Mitchell Evans', 'pos': 'TE', 'team': 'GB', 'pick': 85, 'round': 3, 'college': 'Notre Dame'},
     
-    # Top 2026 NFL Draft Running Back Rookies
-    {'name': 'Ashton Jeanty', 'pos': 'RB', 'team': 'DAL', 'pick': 12, 'round': 1, 'college': 'Boise State'},
-    {'name': 'Quinshon Judkins', 'pos': 'RB', 'team': 'HOU', 'pick': 38, 'round': 2, 'college': 'Ohio State'},
-    {'name': 'TreVeyon Henderson', 'pos': 'RB', 'team': 'NE', 'pick': 45, 'round': 2, 'college': 'Ohio State'},
+    # True 2026 Incoming College Phenoms (Rookies entering Sept 2026)
+    {'name': 'Jeremiah Smith', 'pos': 'WR', 'team': 'CAR', 'pick': 1, 'round': 1, 'college': 'Ohio State'},
+    {'name': 'Ryan Williams', 'pos': 'WR', 'team': 'NE', 'pick': 3, 'round': 1, 'college': 'Alabama'},
+    {'name': 'Arch Manning', 'pos': 'QB', 'team': 'NYG', 'pick': 2, 'round': 1, 'college': 'Texas'},
+    {'name': 'Dylan Raiola', 'pos': 'QB', 'team': 'LV', 'pick': 6, 'round': 1, 'college': 'Nebraska'},
+    {'name': 'DJ Lagway', 'pos': 'QB', 'team': 'TEN', 'pick': 14, 'round': 1, 'college': 'Florida'},
+    {'name': 'Zachariah Branch', 'pos': 'WR', 'team': 'LAC', 'pick': 18, 'round': 1, 'college': 'USC'},
+    {'name': 'Nyck Harbor', 'pos': 'WR', 'team': 'WAS', 'pick': 22, 'round': 1, 'college': 'South Carolina'},
+    {'name': 'Makai Lemon', 'pos': 'WR', 'team': 'LAR', 'pick': 36, 'round': 2, 'college': 'USC'},
+
+    # 2026 NFL Draft Running Back Prospects
     {'name': 'Ollie Gordon II', 'pos': 'RB', 'team': 'MIA', 'pick': 62, 'round': 2, 'college': 'Oklahoma State'},
-    {'name': 'Omarion Hampton', 'pos': 'RB', 'team': 'LAC', 'pick': 35, 'round': 2, 'college': 'North Carolina'},
-    {'name': 'Nicholas Singleton', 'pos': 'RB', 'team': 'WAS', 'pick': 75, 'round': 3, 'college': 'Penn State'},
-    {'name': 'Kaleb Johnson', 'pos': 'RB', 'team': 'GB', 'pick': 50, 'round': 2, 'college': 'Iowa'},
-    
-    # Top 2026 NFL Draft Wide Receiver Rookies
-    {'name': 'Travis Hunter', 'pos': 'WR', 'team': 'JAX', 'pick': 2, 'round': 1, 'college': 'Colorado'},
-    {'name': 'Tetairoa McMillan', 'pos': 'WR', 'team': 'CAR', 'pick': 8, 'round': 1, 'college': 'Arizona'},
-    {'name': 'Luther Burden III', 'pos': 'WR', 'team': 'NE', 'pick': 15, 'round': 1, 'college': 'Missouri'},
-    {'name': 'Emeka Egbuka', 'pos': 'WR', 'team': 'KC', 'pick': 30, 'round': 1, 'college': 'Ohio State'},
-    {'name': 'Elic Ayomanor', 'pos': 'WR', 'team': 'SF', 'pick': 40, 'round': 2, 'college': 'Stanford'},
-    {'name': 'Isaiah Bond', 'pos': 'WR', 'team': 'BUF', 'pick': 48, 'round': 2, 'college': 'Texas'},
-
-    # Top 2026 NFL Draft Quarterback Rookies
-    {'name': 'Cam Ward', 'pos': 'QB', 'team': 'NYG', 'pick': 5, 'round': 1, 'college': 'Miami'},
-    {'name': 'Shedeur Sanders', 'pos': 'QB', 'team': 'LV', 'pick': 10, 'round': 1, 'college': 'Colorado'},
-    {'name': 'Jaxson Dart', 'pos': 'QB', 'team': 'TEN', 'pick': 22, 'round': 1, 'college': 'Ole Miss'},
-    {'name': 'Quinn Ewers', 'pos': 'QB', 'team': 'PIT', 'pick': 33, 'round': 2, 'college': 'Texas'},
-
-    # Top 2026 NFL Draft Tight End Rookies
-    {'name': 'Colston Loveland', 'pos': 'TE', 'team': 'IND', 'pick': 25, 'round': 1, 'college': 'Michigan'},
-    {'name': 'Tyler Warren', 'pos': 'TE', 'team': 'IND', 'pick': 42, 'round': 2, 'college': 'Penn State'}
+    {'name': 'Kaleb Johnson', 'pos': 'RB', 'team': 'GB', 'pick': 50, 'round': 2, 'college': 'Iowa'}
 ]
 
 def generate_predict_features(player_stats_df, oline_map, roster_map):
