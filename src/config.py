@@ -5,6 +5,9 @@ START_YEAR = 2006
 END_YEAR = 2025
 PREDICT_YEAR = 2026
 
+# Number of teams in the league (used for VORP calculations)
+NUM_TEAMS = 10
+
 # Cache directories for downloaded raw data
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')

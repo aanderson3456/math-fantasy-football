@@ -175,12 +175,17 @@ function renderCheatSheet() {
         if (isOlineBoosted) olineClass = 'boosted';
         if (isOlineDowngraded) olineClass = 'downgraded';
 
+        const vorpClass = p.vorp > 0 ? 'oline-val-display boosted' : 'oline-val-display downgraded';
+        const vorpText = p.vorp > 0 ? `+${p.vorp.toFixed(1)}` : p.vorp.toFixed(1);
+
         tr.innerHTML = `
             <td><strong>${p.draft_rank}</strong></td>
             <td><strong>${p.player_name}</strong></td>
             <td><span class="badge pos-${p.position}">${p.position}</span></td>
             <td>${p.team_predict}</td>
             <td class="text-right">${p.predicted_adp.toFixed(2)}</td>
+            <td class="text-right">${p.predicted_pts.toFixed(1)}</td>
+            <td class="text-right"><span class="${vorpClass}">${vorpText}</span></td>
             <td class="text-right">${p.prev_fantasy_points.toFixed(1)}</td>
             <td class="text-right"><span class="oline-val-display ${olineClass}">${p.oline_score.toFixed(2)}</span></td>
             <td class="text-center" style="position: relative;">

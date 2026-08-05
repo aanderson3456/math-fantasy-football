@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
-from src.config import standardize_team, PREDICT_YEAR, TEAM_OLINE_ADJUSTMENTS
+from src.config import standardize_team, PREDICT_YEAR, TEAM_OLINE_ADJUSTMENTS, NUM_TEAMS
 from src.preprocessing import clean_name
 
 # Dict of major player team movements for the prediction season
@@ -14,30 +14,22 @@ PLAYER_TEAM_CHANGES = {
 
 from src.preprocessing import load_draft_picks
 
-# List of top incoming 2026 rookie prospects (including Notre Dame RBs)
+# List of true incoming 2026 NFL rookies (entering their first season in Sept 2026)
 ROOKIE_PROSPECTS_2026 = [
     # Seattle Seahawks 2026 Rookie Spotlight
     {'name': 'Jeremiah Price', 'pos': 'RB', 'team': 'SEA', 'pick': 32, 'round': 1, 'college': 'Notre Dame'},
     
-    # Notre Dame 2026 College Prospects
-    {'name': 'Jeremiyah Love', 'pos': 'RB', 'team': 'CHI', 'pick': 24, 'round': 1, 'college': 'Notre Dame'},
+    # Notre Dame 2026 Drafted Prospects
+    {'name': 'Jeremiyah Love', 'pos': 'RB', 'team': 'ARI', 'pick': 15, 'round': 1, 'college': 'Notre Dame'},
     {'name': 'Aneyas Williams', 'pos': 'RB', 'team': 'DET', 'pick': 120, 'round': 4, 'college': 'Notre Dame'},
     {'name': 'Kedren Young', 'pos': 'RB', 'team': 'GB', 'pick': 135, 'round': 5, 'college': 'Notre Dame'},
     {'name': 'Mitchell Evans', 'pos': 'TE', 'team': 'GB', 'pick': 85, 'round': 3, 'college': 'Notre Dame'},
     
-    # True 2026 Incoming College Phenoms (Rookies entering Sept 2026)
-    {'name': 'Jeremiah Smith', 'pos': 'WR', 'team': 'CAR', 'pick': 1, 'round': 1, 'college': 'Ohio State'},
-    {'name': 'Ryan Williams', 'pos': 'WR', 'team': 'NE', 'pick': 3, 'round': 1, 'college': 'Alabama'},
-    {'name': 'Arch Manning', 'pos': 'QB', 'team': 'NYG', 'pick': 2, 'round': 1, 'college': 'Texas'},
-    {'name': 'Dylan Raiola', 'pos': 'QB', 'team': 'LV', 'pick': 6, 'round': 1, 'college': 'Nebraska'},
-    {'name': 'DJ Lagway', 'pos': 'QB', 'team': 'TEN', 'pick': 14, 'round': 1, 'college': 'Florida'},
-    {'name': 'Zachariah Branch', 'pos': 'WR', 'team': 'LAC', 'pick': 18, 'round': 1, 'college': 'USC'},
-    {'name': 'Nyck Harbor', 'pos': 'WR', 'team': 'WAS', 'pick': 22, 'round': 1, 'college': 'South Carolina'},
-    {'name': 'Makai Lemon', 'pos': 'WR', 'team': 'LAR', 'pick': 36, 'round': 2, 'college': 'USC'},
-
-    # 2026 NFL Draft Running Back Prospects
-    {'name': 'Ollie Gordon II', 'pos': 'RB', 'team': 'MIA', 'pick': 62, 'round': 2, 'college': 'Oklahoma State'},
-    {'name': 'Kaleb Johnson', 'pos': 'RB', 'team': 'GB', 'pick': 50, 'round': 2, 'college': 'Iowa'}
+    # 2026 NFL Draft Notable Selections
+    {'name': 'Fernando Mendoza', 'pos': 'QB', 'team': 'LV', 'pick': 1, 'round': 1, 'college': 'Indiana'},
+    {'name': 'KC Concepcion', 'pos': 'WR', 'team': 'CLE', 'pick': 45, 'round': 2, 'college': 'NC State'},
+    {'name': 'Denzel Boston', 'pos': 'WR', 'team': 'CLE', 'pick': 75, 'round': 3, 'college': 'Washington'},
+    {'name': 'David Bailey', 'pos': 'TE', 'team': 'NYJ', 'pick': 10, 'round': 1, 'college': 'Texas Tech'} # Listed as EDGE originally but putting TE for fantasy
 ]
 
 def generate_predict_features(player_stats_df, oline_map, roster_map):
@@ -210,10 +202,10 @@ def generate_predict_features(player_stats_df, oline_map, roster_map):
     predict_df = pd.DataFrame(predict_rows)
     return predict_df
 
-def make_draft_list(model, scaler, feature_cols, predict_df):
+def make_draft_list(model_adp, model_pts, scaler, feature_cols, predict_df):
     """
-    Standardizes input features, runs PyTorch model inference,
-    clamped to >= 1.0, and returns the sorted draft Cheat Sheet.
+    Standardizes input features, runs PyTorch model inference for ADP and Points,
+    and returns the sorted draft Cheat Sheet.
     """
     if len(predict_df) == 0:
         print("Warning: Input prediction dataframe is empty!")
@@ -233,16 +225,43 @@ def make_draft_list(model, scaler, feature_cols, predict_df):
     X_predict = scaler.transform(X_predict_raw)
     
     # Model inference
-    model.eval()
+    model_adp.eval()
+    model_pts.eval()
     with torch.no_grad():
         inputs = torch.tensor(X_predict, dtype=torch.float32)
-        preds = model(inputs).numpy().flatten()
+        preds_adp = model_adp(inputs).numpy().flatten()
+        preds_pts = model_pts(inputs).numpy().flatten()
         
-    # Clamp predicted ADP
-    preds = np.clip(preds, 1.0, None)
+    # Clamp predictions
+    preds_adp = np.clip(preds_adp, 1.0, None)
+    preds_pts = np.clip(preds_pts, 0.0, None)
     
     # Add predictions back
-    predict_df['predicted_adp'] = preds
+    predict_df['predicted_adp'] = preds_adp
+    predict_df['predicted_pts'] = preds_pts
+    
+    # Calculate VORP (Value Over Replacement Player)
+    baseline_ranks = {
+        'QB': int(1.5 * NUM_TEAMS), 
+        'RB': int(4.0 * NUM_TEAMS), 
+        'WR': int(4.5 * NUM_TEAMS), 
+        'TE': int(1.5 * NUM_TEAMS)
+    }
+    vorp_list = []
+    
+    for pos in ['QB', 'RB', 'WR', 'TE']:
+        pos_df = predict_df[predict_df['position'] == pos].copy()
+        if len(pos_df) > 0:
+            pos_df = pos_df.sort_values(by='predicted_pts', ascending=False)
+            rank = min(baseline_ranks[pos], len(pos_df)) - 1 # 0-indexed
+            baseline_pts = pos_df.iloc[rank]['predicted_pts']
+            pos_df['vorp'] = pos_df['predicted_pts'] - baseline_pts
+            vorp_list.append(pos_df)
+            
+    if vorp_list:
+        predict_df = pd.concat(vorp_list)
+    else:
+        predict_df['vorp'] = 0.0
     
     # Sort to form the draft list
     draft_list = predict_df.sort_values(by='predicted_adp').reset_index(drop=True)

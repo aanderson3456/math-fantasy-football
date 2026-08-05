@@ -301,6 +301,12 @@ def prepare_ml_dataset():
                 if years_exp <= 1:
                     is_rookie = 1
                     
+            # Get actual points in year Y (for the target variable)
+            current_stats_key = (year, clean_pname, pos)
+            actual_pts = 0.0
+            if current_stats_key in stats_map:
+                actual_pts = stats_map[current_stats_key]['fantasy_points']
+                    
             # Get team's O-line score in year Y (since they will play behind this line)
             oline_info = oline_map.get((year, team_ffc), {'oline_score': 0.0, 'team_ypc_ex_qb': 4.0})
             oline_score = oline_info['oline_score']
@@ -321,6 +327,7 @@ def prepare_ml_dataset():
                 'position': pos,
                 'year': year,
                 'adp': adp_val,
+                'actual_pts': actual_pts,
                 'is_rookie': is_rookie,
                 'years_exp': years_exp,
                 'age': age,
@@ -402,10 +409,12 @@ def split_and_scale_data(df):
     val_data = df_encoded[val_mask]
     
     X_train_raw = train_data[feature_cols].copy()
-    y_train = train_data['adp'].values
+    y_train_adp = train_data['adp'].values
+    y_train_pts = train_data['actual_pts'].values
     
     X_val_raw = val_data[feature_cols].copy()
-    y_val = val_data['adp'].values
+    y_val_adp = val_data['adp'].values
+    y_val_pts = val_data['actual_pts'].values
     
     # Scale features
     scaler = StandardScaler()
@@ -414,11 +423,11 @@ def split_and_scale_data(df):
     X_train = scaler.fit_transform(X_train_raw)
     X_val = scaler.transform(X_val_raw)
     
-    return X_train, y_train, X_val, y_val, scaler, feature_cols
+    return X_train, y_train_adp, y_train_pts, X_val, y_val_adp, y_val_pts, scaler, feature_cols
 
 if __name__ == "__main__":
     df = prepare_ml_dataset()
     if len(df) > 0:
-        X_train, y_train, X_val, y_val, scaler, feature_cols = split_and_scale_data(df)
-        print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-        print(f"X_val shape: {X_val.shape}, y_val shape: {y_val.shape}")
+        X_train, y_train_adp, y_train_pts, X_val, y_val_adp, y_val_pts, scaler, feature_cols = split_and_scale_data(df)
+        print(f"X_train shape: {X_train.shape}, y_train_adp shape: {y_train_adp.shape}, y_train_pts shape: {y_train_pts.shape}")
+        print(f"X_val shape: {X_val.shape}, y_val_adp shape: {y_val_adp.shape}, y_val_pts shape: {y_val_pts.shape}")
