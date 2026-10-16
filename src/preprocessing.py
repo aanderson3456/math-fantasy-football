@@ -4,7 +4,7 @@ import re
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from src.config import START_YEAR, END_YEAR, PREDICT_YEAR, CACHE_DIR, standardize_team
+from src.config import START_YEAR, END_YEAR, PREDICT_YEAR, CACHE_DIR, standardize_team, LEAGUE_CONFIG
 
 def clean_name(name):
     """Standardizes player names for robust cross-dataset matching."""
@@ -99,7 +99,7 @@ def load_roster_data():
             try:
                 df = pd.read_parquet(filepath)
                 # Keep useful columns
-                df = df[['season', 'full_name', 'position', 'years_exp', 'birth_date']].dropna(subset=['full_name', 'position'])
+                df = df[['season', 'full_name', 'position', 'years_exp', 'birth_date', 'height', 'weight']].dropna(subset=['full_name', 'position'])
                 for _, row in df.iterrows():
                     name_key = clean_name(row['full_name'])
                     pos_key = str(row['position']).upper()
@@ -110,9 +110,21 @@ def load_roster_data():
                     except:
                         exp = 0
                         
+                    # Convert height and weight
+                    try:
+                        h = float(row['height'])
+                    except:
+                        h = 73.0
+                    try:
+                        w = float(row['weight'])
+                    except:
+                        w = 215.0
+                        
                     roster_map[(row['season'], name_key, pos_key)] = {
                         'years_exp': exp,
-                        'birth_date': row['birth_date']
+                        'birth_date': row['birth_date'],
+                        'height': h,
+                        'weight': w
                     }
             except Exception as e:
                 print(f"Error loading roster for {year}: {e}")
@@ -155,14 +167,16 @@ def load_aggregate_player_stats():
             fumbles_lost += df[col]
     df['fumbles_lost'] = fumbles_lost
     
-    # Calculate Half-PPR fantasy points
-    df['fantasy_points_half_ppr'] = (
+    # Calculate fantasy points based on LEAGUE_CONFIG
+    reception_points = 1.0 if LEAGUE_CONFIG == '12_team_full_ppr' else 0.5
+    
+    df['calculated_fantasy_points'] = (
         df['passing_yards'] * 0.04 + 
         df['passing_tds'] * 4.0 - 
         df['interceptions'] * 2.0 + 
         df['rushing_yards'] * 0.1 + 
         df['rushing_tds'] * 6.0 + 
-        df['receptions'] * 0.5 + 
+        df['receptions'] * reception_points + 
         df['receiving_yards'] * 0.1 + 
         df['receiving_tds'] * 6.0 - 
         df['fumbles_lost'] * 2.0
@@ -183,7 +197,7 @@ def load_aggregate_player_stats():
         receiving_yards=('receiving_yards', 'sum'),
         receiving_tds=('receiving_tds', 'sum'),
         fumbles_lost=('fumbles_lost', 'sum'),
-        fantasy_points=('fantasy_points_half_ppr', 'sum')
+        fantasy_points=('calculated_fantasy_points', 'sum')
     ).reset_index()
     
     return agg_df
@@ -218,6 +232,224 @@ def load_draft_picks():
             }
     return draft_map
 
+def load_depth_charts(year):
+    """
+    Downloads and caches nflverse depth charts for the given year.
+    Returns: depth_map: {(clean_name, pos): pos_rank}
+    """
+    cache_path = os.path.join(CACHE_DIR, f"depth_charts_{year}.parquet")
+    if not os.path.exists(cache_path):
+        try:
+            url = f'https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_{year}.parquet'
+            df = pd.read_parquet(url)
+            df.to_parquet(cache_path)
+        except Exception as e:
+            # Silently fail if year doesn't exist
+            return {}
+    else:
+        df = pd.read_parquet(cache_path)
+        
+    name_col = 'player_name' if 'player_name' in df.columns else 'full_name'
+    if name_col not in df.columns:
+        # Fallback if no name column exists
+        return {}
+    df['clean_name'] = df[name_col].apply(clean_name)
+    pos_col = 'pos_abb' if 'pos_abb' in df.columns else ('position' if 'position' in df.columns else 'pos')
+    if pos_col not in df.columns:
+        return {}
+    
+    # Filter to latest available dt (pre-season kickoff state)
+    if 'dt' in df.columns:
+        df = df.sort_values('dt').drop_duplicates(subset=['clean_name', pos_col], keep='last')
+        
+    depth_map = {}
+    for _, row in df.iterrows():
+        p_name = row['clean_name']
+        pos = str(row[pos_col]).upper()
+        if pos in ['WR', 'RB', 'TE', 'QB']:
+            try:
+                depth_map[(p_name, pos)] = int(row['pos_rank'])
+            except:
+                pass
+    return depth_map
+
+
+def load_depth_charts_teams(year):
+    """
+    Loads nflverse depth charts for the given year and extracts player teams.
+    Returns: depth_team_map: {(clean_name, pos): team_abbr}, name_only_map: {clean_name: team_abbr}
+    """
+    cache_path = os.path.join(CACHE_DIR, f"depth_charts_{year}.parquet")
+    if not os.path.exists(cache_path):
+        return {}, {}
+    df = pd.read_parquet(cache_path)
+    name_col = 'player_name' if 'player_name' in df.columns else 'full_name'
+    if name_col not in df.columns:
+        return {}, {}
+    df['clean_name'] = df[name_col].apply(clean_name)
+    pos_col = 'pos_abb' if 'pos_abb' in df.columns else ('position' if 'position' in df.columns else 'pos')
+    if pos_col not in df.columns:
+        return {}, {}
+    
+    # Sort by dt to keep the latest pre-season depth chart state
+    if 'dt' in df.columns:
+        df = df.sort_values('dt').drop_duplicates(subset=['clean_name', pos_col], keep='last')
+        
+    depth_team_map = {}
+    name_only_map = {}
+    for _, row in df.iterrows():
+        p_name = row['clean_name']
+        pos = str(row[pos_col]).upper()
+        team_val = standardize_team(row.get('team'))
+        if team_val and team_val != 'UNK':
+            depth_team_map[(p_name, pos)] = team_val
+            name_only_map[p_name] = team_val
+            
+    return depth_team_map, name_only_map
+
+
+def compute_coach_metrics(player_stats_df):
+    """
+    Computes coach history, demographic, and playcalling features.
+    Returns: coach_map: {(season, team): coach_features_dict}
+    """
+    print("Computing coach metrics...")
+    games_path = os.path.join(CACHE_DIR, "games.parquet")
+    if not os.path.exists(games_path):
+        print("Warning: games.parquet not found. Returning empty coach metrics.")
+        return {}
+        
+    games_df = pd.read_parquet(games_path)
+    
+    # Load coach ages
+    coach_birth_years = {}
+    if os.path.exists("coach_birth_years.json"):
+        with open("coach_birth_years.json", "r") as f:
+            coach_birth_years = json.load(f)
+            
+    # Map coaches to team/season
+    home_coaches = games_df[['season', 'home_team', 'home_coach']].rename(columns={'home_team': 'team', 'home_coach': 'coach'})
+    away_coaches = games_df[['season', 'away_team', 'away_coach']].rename(columns={'away_team': 'team', 'away_coach': 'coach'})
+    team_coaches = pd.concat([home_coaches, away_coaches]).drop_duplicates(subset=['season', 'team', 'coach'])
+    
+    # For a team with multiple coaches in a season, just take the first one for simplicity
+    team_coaches = team_coaches.groupby(['season', 'team']).first().reset_index()
+    team_coaches['std_team'] = team_coaches['team'].apply(standardize_team)
+    
+    # Pre-calculate Coach History
+    # Cumulative Win Pct and Experience
+    games_df['home_win'] = (games_df['home_score'] > games_df['away_score']).astype(int)
+    games_df['away_win'] = (games_df['away_score'] > games_df['home_score']).astype(int)
+    
+    coach_history = []
+    for coach in team_coaches['coach'].unique():
+        if pd.isna(coach): continue
+        c_games = games_df[(games_df['home_coach'] == coach) | (games_df['away_coach'] == coach)].sort_values('season')
+        cumulative_wins = 0
+        cumulative_games = 0
+        seasons_active = set()
+        
+        for idx, row in c_games.iterrows():
+            is_home = (row['home_coach'] == coach)
+            won = row['home_win'] if is_home else row['away_win']
+            season = row['season']
+            
+            # Record state before the game
+            coach_history.append({
+                'coach': coach,
+                'season': season,
+                'wins_before': cumulative_wins,
+                'games_before': cumulative_games,
+                'seasons_active_before': len(seasons_active)
+            })
+            
+            cumulative_wins += won
+            cumulative_games += 1
+            seasons_active.add(season)
+            
+    if not coach_history:
+        return {}
+        
+    ch_df = pd.DataFrame(coach_history).groupby(['coach', 'season']).first().reset_index()
+    ch_df['coach_win_pct'] = ch_df['wins_before'] / ch_df['games_before'].replace(0, 1)
+    ch_df['coach_experience'] = ch_df['seasons_active_before']
+    ch_df['first_year_hc_flag'] = (ch_df['coach_experience'] == 0).astype(float)
+    
+    # Tenure
+    team_coaches = pd.merge(team_coaches, ch_df, on=['coach', 'season'], how='left')
+    team_coaches = team_coaches.sort_values(['team', 'season'])
+    
+    tenure_list = []
+    for team, group in team_coaches.groupby('team'):
+        tenure = 0
+        prev_coach = None
+        for idx, row in group.iterrows():
+            if row['coach'] == prev_coach:
+                tenure += 1
+            else:
+                tenure = 0
+            tenure_list.append(tenure)
+            prev_coach = row['coach']
+    team_coaches['franchise_tenure'] = tenure_list
+    
+    # Calculate Playcalling Preferences from previous season player_stats
+    reg_df = player_stats_df.copy()
+    reg_df['std_team'] = reg_df['recent_team'].apply(standardize_team)
+    
+    # Group by team and season
+    team_stats = reg_df.groupby(['std_team', 'season']).agg(
+        total_targets=('targets', 'sum'),
+        total_rb_targets=('targets', lambda x: x[reg_df.loc[x.index, 'position'] == 'RB'].sum()),
+        total_te_targets=('targets', lambda x: x[reg_df.loc[x.index, 'position'] == 'TE'].sum()),
+        total_rb_touches=('carries', lambda x: (x + reg_df.loc[x.index, 'targets'])[reg_df.loc[x.index, 'position'] == 'RB'].sum()),
+        max_rb_touches=('carries', lambda x: (x + reg_df.loc[x.index, 'targets'])[reg_df.loc[x.index, 'position'] == 'RB'].max())
+    ).reset_index()
+    
+    team_stats['coach_pass_to_rb_share'] = team_stats['total_rb_targets'] / team_stats['total_targets'].replace(0, 1)
+    team_stats['coach_te_target_share'] = team_stats['total_te_targets'] / team_stats['total_targets'].replace(0, 1)
+    team_stats['coach_bellcow_index'] = team_stats['max_rb_touches'] / team_stats['total_rb_touches'].replace(0, 1)
+    
+    # Shift team stats to the next year (so year Y gets Y-1 stats)
+    team_stats['season'] = team_stats['season'] + 1
+    
+    # Merge with team coaches
+    team_coaches = pd.merge(team_coaches, team_stats[['std_team', 'season', 'coach_pass_to_rb_share', 'coach_te_target_share', 'coach_bellcow_index']], 
+                            on=['std_team', 'season'], how='left')
+                            
+    # Fill NAs
+    team_coaches['coach_pass_to_rb_share'] = team_coaches['coach_pass_to_rb_share'].fillna(0.18)
+    team_coaches['coach_te_target_share'] = team_coaches['coach_te_target_share'].fillna(0.20)
+    team_coaches['coach_bellcow_index'] = team_coaches['coach_bellcow_index'].fillna(0.5)
+    
+    # Compute demographics
+    def get_coach_age(row):
+        coach = row['coach']
+        season = row['season']
+        birth_year = coach_birth_years.get(coach)
+        if birth_year:
+            return season - birth_year
+        return 50 # median
+        
+    team_coaches['coach_age'] = team_coaches.apply(get_coach_age, axis=1)
+    team_coaches['is_young_innovator'] = (team_coaches['coach_age'] < 40).astype(float)
+    team_coaches['is_old_school'] = (team_coaches['coach_age'] > 60).astype(float)
+    
+    coach_map = {}
+    for _, row in team_coaches.iterrows():
+        coach_map[(row['season'], row['std_team'])] = {
+            'coach_age': row['coach_age'],
+            'is_young_innovator': row['is_young_innovator'],
+            'is_old_school': row['is_old_school'],
+            'coach_experience': row.get('coach_experience', 0),
+            'coach_win_pct': row.get('coach_win_pct', 0.5),
+            'franchise_tenure': row.get('franchise_tenure', 0),
+            'coach_bellcow_index': row['coach_bellcow_index'],
+            'coach_pass_to_rb_share': row['coach_pass_to_rb_share'],
+            'coach_te_target_share': row['coach_te_target_share'],
+            'first_year_hc_flag': row.get('first_year_hc_flag', 0.0),
+        }
+    return coach_map
+
 def prepare_ml_dataset():
     """
     Builds the complete aligned dataset:
@@ -228,6 +460,7 @@ def prepare_ml_dataset():
     """
     player_stats_df = load_aggregate_player_stats()
     oline_map = compute_oline_scores(player_stats_df)
+    coach_map = compute_coach_metrics(player_stats_df)
     roster_map = load_roster_data()
     draft_map = load_draft_picks()
     
@@ -252,6 +485,9 @@ def prepare_ml_dataset():
         with open(adp_filepath, 'r', encoding='utf-8') as f:
             adp_data = json.load(f)
             
+        # Load depth chart for this year
+        depth_map = load_depth_charts(year)
+            
         # Parse players from FFC ADP
         adp_players = adp_data.get('players', [])
         for p in adp_players:
@@ -272,13 +508,17 @@ def prepare_ml_dataset():
             # Match with Y roster
             roster_key = (year, clean_pname, pos)
             
-            # Get experience and age
+            # Get experience, age, height, weight
             years_exp = 0
             age = 26.0  # default median
+            height = 73.0
+            weight = 215.0
             
             roster_info = roster_map.get(roster_key, roster_map.get((prev_season, clean_pname, pos), None))
             if roster_info:
                 years_exp = roster_info['years_exp']
+                height = roster_info['height']
+                weight = roster_info['weight']
                 birth_date = roster_info['birth_date']
                 if birth_date:
                     try:
@@ -321,6 +561,17 @@ def prepare_ml_dataset():
             is_rookie_top_50 = 1.0 if (is_rookie == 1 and draft_pick_num <= 50) else 0.0
             rookie_expected_volume = max(0.0, 160.0 - 0.8 * draft_pick_num) if is_rookie == 1 else 0.0
             
+            # Depth Chart Features
+            pos_rank = depth_map.get((clean_pname, pos), 99)
+            is_team_wr1 = 1.0 if (pos == 'WR' and pos_rank == 1) else 0.0
+            is_team_wr2 = 1.0 if (pos == 'WR' and pos_rank == 2) else 0.0
+            is_team_rb1 = 1.0 if (pos == 'RB' and pos_rank == 1) else 0.0
+            
+            # Coach History & Age Features
+            coach_info = coach_map.get((year, team_ffc), {})
+            coach_age = coach_info.get('coach_age', 50.0)
+            coach_player_age_gap = coach_age - age
+                        
             # Create feature row
             row_dict = {
                 'player_name': name,
@@ -331,6 +582,8 @@ def prepare_ml_dataset():
                 'is_rookie': is_rookie,
                 'years_exp': years_exp,
                 'age': age,
+                'height': height,
+                'weight': weight,
                 'oline_score': oline_score,
                 'team_ypc_ex_qb': team_ypc,
                 # Pillar 1 Features
@@ -352,7 +605,24 @@ def prepare_ml_dataset():
                 'prev_receiving_yards': prev_stats['receiving_yards'],
                 'prev_receiving_tds': prev_stats['receiving_tds'],
                 'prev_fumbles_lost': prev_stats['fumbles_lost'],
-                'prev_fantasy_points': prev_stats['fantasy_points']
+                'prev_fantasy_points': prev_stats['fantasy_points'],
+                # Depth Chart Features
+                'is_team_wr1': is_team_wr1,
+                'is_team_wr2': is_team_wr2,
+                'is_team_rb1': is_team_rb1,
+                # Coach History & Age Features
+                'coach_age': coach_age,
+                'is_young_innovator': coach_info.get('is_young_innovator', 0.0),
+                'is_old_school': coach_info.get('is_old_school', 0.0),
+                'coach_player_age_gap': coach_player_age_gap,
+                'coach_experience': coach_info.get('coach_experience', 0),
+                'coach_win_pct': coach_info.get('coach_win_pct', 0.5),
+                'franchise_tenure': coach_info.get('franchise_tenure', 0),
+                'coach_bellcow_index': coach_info.get('coach_bellcow_index', 0.5),
+                'coach_pass_to_rb_share': coach_info.get('coach_pass_to_rb_share', 0.18),
+                'coach_te_target_share': coach_info.get('coach_te_target_share', 0.20),
+                'first_year_hc_flag': coach_info.get('first_year_hc_flag', 0.0),
+                'coach_pass_rate': coach_info.get('coach_pass_to_rb_share', 0.5) # Proxy if needed
             }
             
             # Create Running Back Specific O-Line Interaction features
@@ -379,7 +649,7 @@ def split_and_scale_data(df):
     """
     # Features list (excluding metadata and target)
     feature_cols = [
-        'is_rookie', 'years_exp', 'age', 'oline_score', 'team_ypc_ex_qb',
+        'is_rookie', 'years_exp', 'age', 'height', 'weight', 'oline_score', 'team_ypc_ex_qb',
         # Pillar 1 Features
         'draft_pick_num', 'draft_round', 'is_day_1', 'is_day_2',
         'is_rookie_top_50', 'rookie_expected_volume',
@@ -387,6 +657,11 @@ def split_and_scale_data(df):
         'prev_rushing_yards', 'prev_carries', 'prev_rushing_tds',
         'prev_receptions', 'prev_targets', 'prev_receiving_yards',
         'prev_receiving_tds', 'prev_fumbles_lost', 'prev_fantasy_points',
+        'is_team_wr1', 'is_team_wr2', 'is_team_rb1',
+        'coach_age', 'is_young_innovator', 'is_old_school', 'coach_player_age_gap',
+        'coach_experience', 'coach_win_pct', 'franchise_tenure',
+        'coach_bellcow_index', 'coach_pass_to_rb_share', 'coach_te_target_share',
+        'first_year_hc_flag', 'coach_pass_rate',
         'rb_oline_score_inter', 'rb_team_ypc_inter',
         'wr_oline_score_inter', 'te_oline_score_inter',
         # One-hot encoded positions

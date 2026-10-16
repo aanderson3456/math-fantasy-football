@@ -30,7 +30,7 @@ if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
     gcloud config set project "$PROJECT_ID"
 else
     echo -e "${GREEN}Detected active GCP Project ID: $PROJECT_ID${CLEAR}"
-    read -p "Do you want to use this project? (Y/n): " confirm
+    confirm="Y"
     confirm=${confirm:-Y}
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         read -p "Enter Google Cloud Project ID: " PROJECT_ID
@@ -39,11 +39,11 @@ else
 fi
 
 # 3. Prompt for custom site password
-read -p "Enter a custom site password (default: 'amaballs'): " SITE_PASSWORD
+SITE_PASSWORD="mafiadraft"
 SITE_PASSWORD=${SITE_PASSWORD:-amaballs}
 
 # 4. Trigger Cloud Run build & deploy
-SERVICE_NAME="fantasy-draft-suite"
+SERVICE_NAME="mafia-draft"
 REGION="us-central1"
 
 echo -e "\n${BLUE}Deploying '$SERVICE_NAME' to Google Cloud Run ($REGION)...${CLEAR}"
@@ -56,7 +56,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --allow-unauthenticated \
     --port 8080 \
     --memory 2Gi \
-    --set-env-vars SITE_PASSWORD="$SITE_PASSWORD",SECRET_KEY="draft_secret_$(openssl rand -hex 12 2>/dev/null || echo 'default_secret')"
+    --set-env-vars SITE_PASSWORD="$SITE_PASSWORD",LEAGUE_CONFIG="mafia",SECRET_KEY="draft_secret_$(openssl rand -hex 12 2>/dev/null || echo 'default_secret')"
 
 echo -e "\n${GREEN}=== 🎉 Deployment Complete! ===${CLEAR}"
 echo "Your site is live! You can share the link with your league mates."

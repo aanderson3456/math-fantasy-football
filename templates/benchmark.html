@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Fantasy2.0 Model Benchmark - Neural Network vs Yahoo Accuracy & Brier Score Evaluation.">
+    <title>Fantasy2.0 - Brier Scorecard & Model Benchmark</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/matchup.css') }}">
+    
+    <style>
+        .benchmark-container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .stat-grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: rgba(15, 23, 42, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card.winner-glow {
+            border-color: rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.15);
+        }
+        .stat-label {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .stat-val-huge {
+            font-size: 2.2rem;
+            font-weight: 800;
+            font-family: 'Outfit', sans-serif;
+            color: #f8fafc;
+            line-height: 1.1;
+        }
+        .stat-comparison {
+            font-size: 0.85rem;
+            margin-top: 8px;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .postmortem-card {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 14px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .postmortem-title {
+            color: #f87171;
+            font-size: 1.3rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .league-postmortem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 20px;
+        }
+        .league-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .league-box h4 {
+            color: #38bdf8;
+            font-size: 1.05rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .bullet-point {
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #cbd5e1;
+        }
+        .bullet-point strong {
+            color: #f1f5f9;
+        }
+        .tag-bad {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+        .tag-good {
+            background: rgba(34, 197, 94, 0.2);
+            color: #86efac;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+        .table-custom {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin-top: 12px;
+        }
+        .table-custom th {
+            background: rgba(30, 41, 59, 0.8);
+            color: #94a3b8;
+            text-align: left;
+            padding: 10px 14px;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .table-custom td {
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: #e2e8f0;
+        }
+        .table-custom tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <div class="benchmark-container">
+        <!-- Header -->
+        <header class="top-nav card" style="margin-bottom: 24px;">
+            <div class="nav-brand">
+                <div class="brand-icon" style="background: linear-gradient(135deg, #8b5cf6, #ec4899);">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div>
+                    <h1 class="brand-title">Model Benchmark & Scorecard</h1>
+                    <span class="brand-subtitle">Neural Network vs Yahoo • Weeks 1 & 2 Evaluated</span>
+                </div>
+            </div>
+            <div class="nav-actions">
+                <a href="{{ url_for('matchup_view') }}" class="btn btn-secondary nav-link-btn" title="Matchup Hub">
+                    <i class="fa-solid fa-bolt-lightning"></i> Matchup Hub
+                </a>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary nav-link-btn" title="Draft Suite">
+                    <i class="fa-solid fa-list-ol"></i> Draft Suite
+                </a>
+            </div>
+        </header>
+
+        <!-- Cumulative Summary Cards -->
+        <div class="stat-grid-4">
+            <div class="stat-card winner-glow">
+                <div class="stat-label">
+                    <span>NN Accuracy Win Rate</span>
+                    <span class="tag-good">WINNER</span>
+                </div>
+                <div class="stat-val-huge text-accent">66.5%</div>
+                <div class="stat-comparison">
+                    <i class="fa-solid fa-check-circle"></i> NN closer in <strong>133 of 200</strong> player games
+                </div>
+            </div>
+
+            <div class="stat-card winner-glow">
+                <div class="stat-label">
+                    <span>Mean Absolute Error (MAE)</span>
+                    <span class="tag-good">NN -2.91 PTS</span>
+                </div>
+                <div class="stat-val-huge">4.50 <span style="font-size: 1.1rem; color: #94a3b8;">vs 7.41</span></div>
+                <div class="stat-comparison">
+                    <i class="fa-solid fa-arrow-trend-down"></i> NN error is <strong>39.3% lower</strong> than Yahoo
+                </div>
+            </div>
+
+            <div class="stat-card winner-glow">
+                <div class="stat-label">
+                    <span>Root Mean Sq Error (RMSE)</span>
+                    <span class="tag-good">NN -3.27 PTS</span>
+                </div>
+                <div class="stat-val-huge">6.56 <span style="font-size: 1.1rem; color: #94a3b8;">vs 9.83</span></div>
+                <div class="stat-comparison">
+                    <i class="fa-solid fa-shield-halved"></i> Significantly fewer catastrophic misses
+                </div>
+            </div>
+
+            <div class="stat-card winner-glow">
+                <div class="stat-label">
+                    <span>Brier Score (P >= 15 pts)</span>
+                    <span class="tag-good">BETTER CALIBRATION</span>
+                </div>
+                <div class="stat-val-huge">0.1615 <span style="font-size: 1.1rem; color: #94a3b8;">vs 0.1866</span></div>
+                <div class="stat-comparison">
+                    <i class="fa-solid fa-bullseye"></i> NN boom probabilities <strong>13.5% more reliable</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Postmortem: Why did we do poorly in weeks 1 & 2? -->
+        <div class="postmortem-card">
+            <div class="postmortem-title">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                Root-Cause Postmortem: Why Did Both Teams Start 0–2?
+            </div>
+            <p style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 18px;">
+                The Neural Network beat Yahoo's projections across 66.5% of players, but specific lineup decisions, sudden injuries, and slow starts cost both teams their first two matchups. Here is the forensic breakdown:
+            </p>
+
+            <div class="league-postmortem-grid">
+                <!-- 12-Team Postmortem -->
+                <div class="league-box">
+                    <h4><i class="fa-solid fa-football"></i> 12-Team PPR: "Pitts=tits. Shedeur=ass💦💦" (0–2)</h4>
+                    
+                    <div class="bullet-point">
+                        <span class="tag-bad">CRITICAL LOSS: -29.1 PTS</span><br>
+                        <strong>The QB Starter Error:</strong> Started <strong>Bo Nix</strong> (W1: 6.4, W2: 15.1 = 21.5 pts) while benching <strong>Brock Purdy</strong> (W1: 22.1, W2: 28.5 = 50.6 pts). Leaving Purdy on the bench cost exactly 29.1 points across both losses.
+                    </div>
+
+                    <div class="bullet-point">
+                        <span class="tag-bad">TE & WR FREEZE</span><br>
+                        <strong>Kyle Pitts Total Collapse:</strong> Totaled only 1.5 points across 2 games (0.0 in W1 on 0 catches, 1.5 in W2 on 1 catch).<br>
+                        <strong>Marvin Harrison Jr Slow Start:</strong> Phased out with 3.3 pts in W1 and 0.0 pts in W2.
+                    </div>
+
+                    <div class="bullet-point">
+                        <span class="tag-good">BRIGHT SPOT</span><br>
+                        <strong>Jonathan Taylor:</strong> Smashed with elite RB1 volume (25.1 pts W1, 29.2 pts W2 = 54.3 pts).
+                    </div>
+
+                    <div class="bullet-point" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+                        <strong style="color: #38bdf8;">Week 3 Remedy:</strong> Lock in Brock Purdy at QB1 immediately. Bench Kyle Pitts for waiver TE.
+                    </div>
+                </div>
+
+                <!-- Mafia League Postmortem -->
+                <div class="league-box">
+                    <h4><i class="fa-solid fa-gem"></i> Mafia League: "McBridezilla 🍔" (0–2)</h4>
+                    
+                    <div class="bullet-point">
+                        <span class="tag-bad">INJURY DISASTER</span><br>
+                        <strong>Sam Darnold Zeroed QB:</strong> Suffered an opening-drive glute injury in W1 (0.5 pts) and was declared OUT for W2 (0.0 pts). The team had to absorb a net 0.5 points from the QB position across two weeks.
+                    </div>
+
+                    <div class="bullet-point">
+                        <span class="tag-bad">PASSING SLOWDOWN</span><br>
+                        <strong>Courtland Sutton:</strong> Trapped in Denver passing stagnation (1.1 half-PPR pts W1, 6.5 pts W2).<br>
+                        <strong>Cam Skattebo & Rhamondre Stevenson:</strong> Plunged in Week 2 (Skattebo 7.5, Stevenson 5.6) after great Week 1 debuts.
+                    </div>
+
+                    <div class="bullet-point">
+                        <span class="tag-good">BRIGHT SPOT</span><br>
+                        <strong>Jaxon Smith-Njigba Explosion:</strong> Erupted in Week 2 with 33.5 points (9 rec, 155 yds, 3 TDs).<br>
+                        <strong>Trey McBride:</strong> Paced all tight ends with 15.5 and 14.1 points.
+                    </div>
+
+                    <div class="bullet-point" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+                        <strong style="color: #38bdf8;">Week 3 Remedy:</strong> Stream waiver QB to replace injured Darnold. Keep JSN & McBride in must-start roles.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Positional Breakdown Table -->
+        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+            <h3 style="margin-bottom: 12px; font-size: 1.15rem; color: #f8fafc;">
+                <i class="fa-solid fa-layer-group text-accent"></i> Accuracy Breakdown by Position (200 Games)
+            </h3>
+            <table class="table-custom">
+                <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Evaluations</th>
+                        <th>NN Closer %</th>
+                        <th>NN MAE</th>
+                        <th>Yahoo MAE</th>
+                        <th>NN Brier</th>
+                        <th>Yahoo Brier</th>
+                        <th>Calibration Edge</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>QB</strong></td>
+                        <td>40</td>
+                        <td><span class="tag-good">80.0%</span></td>
+                        <td><strong>6.62</strong></td>
+                        <td>16.15</td>
+                        <td>0.3296</td>
+                        <td>0.4300</td>
+                        <td><span class="tag-good">NN (+0.1004)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>TE</strong></td>
+                        <td>26</td>
+                        <td><span class="tag-good">73.1%</span></td>
+                        <td><strong>2.92</strong></td>
+                        <td>4.61</td>
+                        <td>0.0384</td>
+                        <td>0.0828</td>
+                        <td><span class="tag-good">NN (+0.0444)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>RB</strong></td>
+                        <td>60</td>
+                        <td><span class="tag-good">61.7%</span></td>
+                        <td><strong>3.15</strong></td>
+                        <td>4.69</td>
+                        <td>0.0568</td>
+                        <td>0.0904</td>
+                        <td><span class="tag-good">NN (+0.0336)</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>WR</strong></td>
+                        <td>74</td>
+                        <td><span class="tag-good">60.8%</span></td>
+                        <td><strong>4.99</strong></td>
+                        <td>5.88</td>
+                        <td>0.1986</td>
+                        <td>0.1695</td>
+                        <td><span class="tag-bad">Yahoo (+0.0291)</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Biggest NN Steals / Divergences -->
+        <div class="card" style="padding: 20px;">
+            <h3 style="margin-bottom: 12px; font-size: 1.15rem; color: #f8fafc;">
+                <i class="fa-solid fa-trophy text-accent"></i> Top Model Wins: Where NN Exposed Yahoo's Overprojections
+            </h3>
+            <table class="table-custom">
+                <thead>
+                    <tr>
+                        <th>Player</th>
+                        <th>Pos</th>
+                        <th>Team</th>
+                        <th>Actual Pts</th>
+                        <th>NN Projection</th>
+                        <th>Yahoo Projection</th>
+                        <th>NN Advantage Margin</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Jordan Love</strong></td>
+                        <td>QB</td>
+                        <td>GB/ARI</td>
+                        <td>0.0</td>
+                        <td>4.60</td>
+                        <td>31.15</td>
+                        <td><span class="tag-good">+26.55 pts closer</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Malik Willis</strong></td>
+                        <td>QB</td>
+                        <td>MIA</td>
+                        <td>3.3</td>
+                        <td>3.43</td>
+                        <td>28.79</td>
+                        <td><span class="tag-good">+25.36 pts closer</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Joe Burrow</strong></td>
+                        <td>QB</td>
+                        <td>CIN</td>
+                        <td>11.2</td>
+                        <td>12.43</td>
+                        <td>35.45</td>
+                        <td><span class="tag-good">+23.02 pts closer</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Jared Goff</strong></td>
+                        <td>QB</td>
+                        <td>DET</td>
+                        <td>14.8</td>
+                        <td>13.93</td>
+                        <td>33.34</td>
+                        <td><span class="tag-good">+17.67 pts closer</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Justin Herbert</strong></td>
+                        <td>QB</td>
+                        <td>LAC</td>
+                        <td>13.2</td>
+                        <td>12.73</td>
+                        <td>32.07</td>
+                        <td><span class="tag-good">+18.40 pts closer</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Fantasy2.0 Weekly Matchup Hub - Compare Yahoo vs PyTorch Neural Network projections with dynamic bench swapping and live win probability.">
+    <title>Fantasy2.0 - Weekly Matchup & Lineup Decision Hub</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/matchup.css') }}">
+</head>
+<body>
+    <!-- Background Gradient Glows -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <div class="matchup-page-container">
+        <!-- Top Navigation Header -->
+        <header class="top-nav card">
+            <div class="nav-brand">
+                <div class="brand-icon">
+                    <i class="fa-solid fa-bolt-lightning"></i>
+                </div>
+                <div>
+                    <h1 class="brand-title">Fantasy2.0</h1>
+                    <span class="brand-subtitle">Matchup & Lineup Decision Hub</span>
+                </div>
+            </div>
+
+            <!-- League Matchups Selector Bar -->
+            <div class="matchup-selector-container">
+                <span class="selector-label"><i class="fa-solid fa-trophy"></i> Week 1 Matchups:</span>
+                <div class="matchup-pills" id="matchup-pills-bar">
+                    <!-- Populated dynamically by matchup.js -->
+                </div>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="nav-actions">
+                <a href="{{ url_for('benchmark_view') }}" class="btn btn-secondary nav-link-btn" title="Model Benchmark & Brier Scorecard" style="border-color: #c084fc; color: #f472b6;">
+                    <i class="fa-solid fa-chart-line"></i> Brier Scorecard
+                </a>
+                <a href="{{ url_for('index') }}" class="btn btn-secondary nav-link-btn" title="Back to Live Draft Suite">
+                    <i class="fa-solid fa-list-ol"></i> Draft Suite
+                </a>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary nav-link-btn" title="Logout">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                </a>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="matchup-main">
+            <!-- Scoreboard Banner -->
+            <section class="scoreboard-card card">
+                <!-- Team 1 Side -->
+                <div class="scoreboard-team" id="sb-team1">
+                    <div class="team-meta">
+                        <div class="team-avatar" id="t1-avatar"><i class="fa-solid fa-shield-halved"></i></div>
+                        <div>
+                            <h2 class="team-name" id="t1-name">Team 1</h2>
+                            <span class="team-badge" id="t1-user-badge">YOUR ROSTER</span>
+                        </div>
+                    </div>
+                    
+                    <div class="score-displays">
+                        <div class="model-score nn-score">
+                            <span class="model-tag"><i class="fa-solid fa-brain"></i> NN Proj</span>
+                            <div class="pts-number" id="t1-nn-pts">0.00</div>
+                            <span class="pts-unit">pts</span>
+                        </div>
+                        <div class="model-score yahoo-score">
+                            <span class="model-tag"><i class="fa-solid fa-chart-line"></i> Yahoo Proj</span>
+                            <div class="pts-number" id="t1-yahoo-pts">0.00</div>
+                            <span class="pts-unit">pts</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Center VS & Win Probability Meters -->
+                <div class="scoreboard-center">
+                    <div class="consensus-badge" id="consensus-badge">
+                        <i class="fa-solid fa-scale-balanced"></i> <span id="consensus-text">Loading Matchup...</span>
+                    </div>
+
+                    <!-- Dual Win Probability Bars -->
+                    <div class="prob-section">
+                        <!-- NN Probability Bar -->
+                        <div class="prob-bar-container">
+                            <div class="prob-label-row">
+                                <span class="prob-name"><i class="fa-solid fa-brain"></i> NN Win Odds</span>
+                                <span class="prob-val" id="nn-prob-t1-val">50%</span>
+                                <span class="prob-val" id="nn-prob-t2-val">50%</span>
+                            </div>
+                            <div class="dual-progress-track">
+                                <div class="progress-fill-t1 nn-fill" id="nn-progress-bar" style="width: 50%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Yahoo Probability Bar -->
+                        <div class="prob-bar-container">
+                            <div class="prob-label-row">
+                                <span class="prob-name"><i class="fa-solid fa-chart-line"></i> Yahoo Win Odds</span>
+                                <span class="prob-val" id="yahoo-prob-t1-val">50%</span>
+                                <span class="prob-val" id="yahoo-prob-t2-val">50%</span>
+                            </div>
+                            <div class="dual-progress-track">
+                                <div class="progress-fill-t1 yahoo-fill" id="yahoo-progress-bar" style="width: 50%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Controls -->
+                    <div class="matchup-quick-actions">
+                        <button class="btn btn-primary btn-sm" id="auto-optimize-btn">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Optimize Lineup (NN)
+                        </button>
+                        <button class="btn btn-secondary btn-sm" id="reset-lineup-btn">
+                            <i class="fa-solid fa-rotate-left"></i> Reset to Default
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Team 2 Side -->
+                <div class="scoreboard-team scoreboard-team-right" id="sb-team2">
+                    <div class="team-meta">
+                        <div>
+                            <h2 class="team-name" id="t2-name">Team 2</h2>
+                            <span class="team-badge opponent-badge" id="t2-user-badge">OPPONENT</span>
+                        </div>
+                        <div class="team-avatar opponent-avatar" id="t2-avatar"><i class="fa-solid fa-skull"></i></div>
+                    </div>
+                    
+                    <div class="score-displays">
+                        <div class="model-score nn-score">
+                            <span class="model-tag"><i class="fa-solid fa-brain"></i> NN Proj</span>
+                            <div class="pts-number" id="t2-nn-pts">0.00</div>
+                            <span class="pts-unit">pts</span>
+                        </div>
+                        <div class="model-score yahoo-score">
+                            <span class="model-tag"><i class="fa-solid fa-chart-line"></i> Yahoo Proj</span>
+                            <div class="pts-number" id="t2-yahoo-pts">0.00</div>
+                            <span class="pts-unit">pts</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sub Swap Helper Alert Bar (Shows active swap state) -->
+            <div class="sub-alert-bar" id="sub-active-alert" style="display: none;">
+                <div class="alert-content">
+                    <i class="fa-solid fa-arrow-right-arrow-left fa-beat-fade"></i>
+                    <span>Select a player below to complete the substitution with <strong id="sub-source-player">Player Name</strong> (<span id="sub-source-slot">Slot</span>).</span>
+                </div>
+                <button class="btn btn-secondary btn-xs" id="cancel-sub-btn">Cancel Swap</button>
+            </div>
+
+            <!-- Rosters Grid (Team 1 vs Team 2) -->
+            <section class="rosters-grid">
+                <!-- Team 1 Column -->
+                <div class="team-column" id="team1-column">
+                    <div class="column-header">
+                        <h3 class="col-title"><span id="t1-col-name">Team 1</span> Lineup</h3>
+                        <span class="roster-count"><i class="fa-solid fa-users"></i> 9 Starters | 5 Bench</span>
+                    </div>
+
+                    <!-- Starters Card -->
+                    <div class="card roster-card">
+                        <div class="section-title-row">
+                            <h4><i class="fa-solid fa-star text-warning"></i> Starting Lineup</h4>
+                            <span class="table-legend">Click <span class="badge-sub-pill">SUB</span> to swap from bench</span>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="lineup-table" id="t1-starters-table">
+                                <thead>
+                                    <tr>
+                                        <th>Slot</th>
+                                        <th>Player</th>
+                                        <th>NN Proj</th>
+                                        <th>Yahoo Proj</th>
+                                        <th>Divergence</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="t1-starters-tbody">
+                                    <!-- Injected by matchup.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Bench Card -->
+                    <div class="card roster-card bench-card">
+                        <div class="section-title-row">
+                            <h4><i class="fa-solid fa-couch text-secondary"></i> Bench Roster</h4>
+                            <span class="table-legend">Click any player to sub into starters</span>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="lineup-table bench-table" id="t1-bench-table">
+                                <thead>
+                                    <tr>
+                                        <th>Pos</th>
+                                        <th>Player</th>
+                                        <th>NN Proj</th>
+                                        <th>Yahoo Proj</th>
+                                        <th>Divergence</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="t1-bench-tbody">
+                                    <!-- Injected by matchup.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Team 2 Column -->
+                <div class="team-column" id="team2-column">
+                    <div class="column-header">
+                        <h3 class="col-title"><span id="t2-col-name">Team 2</span> Lineup</h3>
+                        <span class="roster-count"><i class="fa-solid fa-users"></i> 9 Starters | 5 Bench</span>
+                    </div>
+
+                    <!-- Starters Card -->
+                    <div class="card roster-card">
+                        <div class="section-title-row">
+                            <h4><i class="fa-solid fa-star text-warning"></i> Starting Lineup</h4>
+                            <span class="table-legend">Click <span class="badge-sub-pill">SUB</span> to test opponent swaps</span>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="lineup-table" id="t2-starters-table">
+                                <thead>
+                                    <tr>
+                                        <th>Slot</th>
+                                        <th>Player</th>
+                                        <th>NN Proj</th>
+                                        <th>Yahoo Proj</th>
+                                        <th>Divergence</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="t2-starters-tbody">
+                                    <!-- Injected by matchup.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Bench Card -->
+                    <div class="card roster-card bench-card">
+                        <div class="section-title-row">
+                            <h4><i class="fa-solid fa-couch text-secondary"></i> Bench Roster</h4>
+                            <span class="table-legend">Click any player to sub into starters</span>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="lineup-table bench-table" id="t2-bench-table">
+                                <thead>
+                                    <tr>
+                                        <th>Pos</th>
+                                        <th>Player</th>
+                                        <th>NN Proj</th>
+                                        <th>Yahoo Proj</th>
+                                        <th>Divergence</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="t2-bench-tbody">
+                                    <!-- Injected by matchup.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Intelligence Panel: Why Models Disagree -->
+            <section class="card intel-section">
+                <div class="intel-header">
+                    <h3><i class="fa-solid fa-microchip text-accent"></i> Neural Network vs Yahoo: Intelligence & Disagreement Breakdown</h3>
+                    <p class="intel-subtitle">Detailed breakdown of key divergence calls in this matchup to help you make informed start/sit decisions.</p>
+                </div>
+                <div class="intel-cards-grid" id="intel-cards-grid">
+                    <!-- Populated dynamically -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/matchup.js') }}"></script>
+</body>
+</html>

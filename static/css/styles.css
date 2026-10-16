@@ -720,3 +720,249 @@ body {
     background: rgba(161, 161, 170, 0.25);
 }
 
+
+/* Strategy Assistant Styles */
+.strategy-dashboard {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.strategy-status, .strategy-needs {
+    flex: 1;
+    background: #f1f5f9;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid var(--primary-color);
+}
+.strategy-warning-card {
+    background: #fff3cd;
+    color: #856404;
+    padding: 10px 15px;
+    border-radius: 6px;
+    border-left: 4px solid #ffc107;
+    margin-bottom: 10px;
+}
+.strategy-rec-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.rec-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.rec-header h4 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+.rec-reason-badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+.rec-desc {
+    font-size: 0.9rem;
+    color: var(--text-color);
+    margin-bottom: 10px;
+}
+.rec-meta {
+    display: flex;
+    gap: 15px;
+    font-size: 0.85rem;
+    color: #64748b;
+}
+.strategy-recs {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Completed Draft Tracker & Value Analysis Styles */
+.draft-complete-banner {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 20px 24px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 182, 212, 0.12));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    margin-bottom: 20px;
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+}
+
+.draft-complete-banner .banner-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid #10b981;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: #10b981;
+    flex-shrink: 0;
+}
+
+.draft-complete-banner h2 {
+    font-size: 18px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.draft-complete-banner p {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.power-rankings-section {
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+}
+
+.draft-grades-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin-top: 12px;
+}
+
+.grade-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s ease;
+}
+
+.grade-card:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.grade-card.my-team-card {
+    border-color: #10b981;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.05));
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+
+.grade-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.grade-team-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
+
+.grade-badge-pill {
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-weight: 800;
+    font-size: 14px;
+}
+
+.grade-a { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
+.grade-b { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; }
+.grade-c { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; }
+
+.grade-meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.25);
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+.grade-steals-box {
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.steal-text { color: #34d399; font-weight: 600; }
+.reach-text { color: #f87171; font-weight: 600; }
+
+.draft-board-card {
+    padding: 20px;
+    border-radius: 16px;
+}
+
+.draft-board-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.board-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.form-input-sm {
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+
+.form-select-sm {
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #18181b;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+
+.val-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    text-align: center;
+}
+
+.val-steal { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+.val-reach { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+.val-fair { background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.1); }
+
+tr.my-pick-row td {
+    background: rgba(16, 185, 129, 0.05);
+}
+

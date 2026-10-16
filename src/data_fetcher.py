@@ -117,14 +117,26 @@ def fetch_adp_data():
             
     return adp_paths
 
+def fetch_games_data():
+    """Downloads historical game schedules (including coach info) from nflverse."""
+    filepath = os.path.join(CACHE_DIR, "games.parquet")
+    url = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.parquet"
+    if not os.path.exists(filepath):
+        print("Fetching historical games data...")
+        download_file(url, filepath)
+    else:
+        print(f"Games data already cached at {filepath}")
+    return filepath
+
 def run_data_fetch():
     """Executes the full data collection pipeline."""
     print("Starting data collection pipeline...")
     stats_path = fetch_player_stats()
     roster_paths = fetch_rosters()
     adp_paths = fetch_adp_data()
+    games_path = fetch_games_data()
     print("Data collection pipeline complete!")
-    return stats_path, roster_paths, adp_paths
+    return stats_path, roster_paths, adp_paths, games_path
 
 if __name__ == "__main__":
     run_data_fetch()

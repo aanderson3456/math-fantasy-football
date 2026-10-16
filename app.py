@@ -11,22 +11,54 @@ from src.preprocessing import load_aggregate_player_stats, compute_oline_scores,
 from src.model import FantasyDataset, FantasyNN, train_model
 from src.draft_generator import generate_predict_features, make_draft_list
 from src.drive_uploader import upload_file_to_drive
+from src.config import LEAGUE_CONFIG
+from src.strategy_engine import DraftStrategyEngine
+from src.matchup_engine import MatchupEngine
+from src.draft_results_service import DraftResultsService
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'fantasy_secret_2026')
 
-# Constants
-MODEL_ADP_PATH = "data/cache/fantasy_nn_adp_model.pth"
-MODEL_PTS_PATH = "data/cache/fantasy_nn_pts_model.pth"
-SCALER_PATH = "data/cache/scaler.pkl"
-FEATURES_PATH = "data/cache/feature_cols.pkl"
+matchup_engine = MatchupEngine()
+draft_results_service = DraftResultsService()
 
-# 10 League Teams
-LEAGUE_TEAMS = [
-    'Jonathan Taylor Day', 'Hope Mahomes Still Standing', 'Lizard lizard lizard',
-    'MR. SNIFFLES', 'Why did I trade JSN?', 'No Mo Toe Joe',
-    'In My Football Era', 'Kittle Me This', 'Rippin Darts', 'Erica Loves Sports'
-]
+# Constants
+if LEAGUE_CONFIG == '12_team_full_ppr':
+    MODEL_ADP_PATH = "data/cache/fantasy_nn_adp_model_12team.pth"
+    MODEL_PTS_PATH = "data/cache/fantasy_nn_pts_model_12team.pth"
+    SCALER_PATH = "data/cache/scaler_12team.pkl"
+    FEATURES_PATH = "data/cache/feature_cols_12team.pkl"
+    # 12 League Teams
+    LEAGUE_TEAMS = [
+        'Pitts=tits. Shedeur=ass💦💦', 'Big Lift Hammah Squad', 'My team Garbaaaaage',
+        '🐼🐨', 'LaChampion', '2KSA', 'Kamarageddon', 'The Ark',
+        'DaKimchiStallion', 'Multiple Scoregasms', 'Live Aloha', 'A$$ Clapper 130'
+    ]
+elif LEAGUE_CONFIG == 'mafia':
+    MODEL_ADP_PATH = "data/cache/fantasy_nn_adp_model_private.pth"
+    MODEL_PTS_PATH = "data/cache/fantasy_nn_pts_model_private.pth"
+    SCALER_PATH = "data/cache/scaler_private.pkl"
+    FEATURES_PATH = "data/cache/feature_cols_private.pkl"
+    # 10 Official League Teams from THE Adult Cousin Mafia League
+    LEAGUE_TEAMS = [
+        'Draft Deez Nutz', 'Erica Loves Sports', 'Lizard lizard lizard',
+        'Hit Me With Your Prescott', 'Mahomes a Tear Down', 'Kittle Me This',
+        "Dartin' to the Blue Tent", 'Urlach’d n Loaded', 'Bijans dont scare me',
+        'MR. SNIFFLES'
+    ]
+    MY_TEAM = 'Bijans dont scare me'
+else:
+    MODEL_ADP_PATH = "data/cache/fantasy_nn_adp_model.pth"
+    MODEL_PTS_PATH = "data/cache/fantasy_nn_pts_model.pth"
+    SCALER_PATH = "data/cache/scaler.pkl"
+    FEATURES_PATH = "data/cache/feature_cols.pkl"
+    # 10 League Teams
+    LEAGUE_TEAMS = [
+        'Jonathan Taylor Day', 'Hope Mahomes Still Standing', 'Lizard lizard lizard',
+        'MR. SNIFFLES', 'Why did I trade JSN?', 'No Mo Toe Joe',
+        'In My Football Era', 'Kittle Me This', 'Rippin Darts', 'Erica Loves Sports'
+    ]
+    MY_TEAM = 'In My Football Era'
 
 # Global cache for loaded model elements
 _model_adp = None
@@ -139,9 +171,17 @@ def require_login():
 def login():
     if request.method == 'POST':
         password = request.form.get('password')
-        correct_password = os.environ.get('SITE_PASSWORD', 'amaballs')
+        if LEAGUE_CONFIG == '12_team_full_ppr':
+            expected_pw = os.environ.get('SITE_PASSWORD', 'tittybar')
+        elif LEAGUE_CONFIG == 'mafia':
+            expected_pw = os.environ.get('SITE_PASSWORD', 'amaballs')
+        else:
+            expected_pw = os.environ.get('SITE_PASSWORD', 'tittybar')
+            
+        # Accept expected password or both known league passwords
+        valid_passwords = {expected_pw, 'tittybar', 'amaballs'}
         
-        if password == correct_password:
+        if password in valid_passwords:
             session['authenticated'] = True
             return redirect(url_for('index'))
         else:
@@ -156,7 +196,122 @@ def logout():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    try:
+        completed_draft = draft_results_service.get_full_payload()
+    except Exception:
+        completed_draft = None
+    return render_template('index.html', league_config=LEAGUE_CONFIG, completed_draft=completed_draft)
+
+@app.route('/matchups')
+@app.route('/matchup')
+def matchup_view():
+    return render_template('matchup.html', league_config=LEAGUE_CONFIG)
+
+@app.route('/benchmark')
+def benchmark_view():
+    return render_template('benchmark.html', league_config=LEAGUE_CONFIG)
+
+@app.route('/api/benchmark', methods=['GET'])
+def get_benchmark_report():
+    try:
+        from src.benchmark_tracker import BrierBenchmarkTracker
+        week = request.args.get('week', type=int)
+        tracker = BrierBenchmarkTracker()
+        report = tracker.generate_evaluation_report(week=week)
+        return jsonify({
+            'status': 'success',
+            'report': report
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/league_settings', methods=['GET'])
+def get_league_settings():
+    try:
+        settings = matchup_engine.settings
+        teams = settings.get('league_teams', LEAGUE_TEAMS)
+        my_team = settings.get('my_team', MY_TEAM if 'MY_TEAM' in globals() else teams[0])
+        return jsonify({
+            'status': 'success',
+            'settings': {
+                'league_teams': teams,
+                'my_team': my_team,
+                'draft_completed': True,
+                'num_teams': len(teams),
+                'scoring_format': settings.get('scoring_format', 'full_ppr')
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/completed_draft', methods=['GET'])
+def get_completed_draft():
+    try:
+        payload = draft_results_service.get_full_payload()
+        return jsonify({
+            'status': 'success',
+            'data': payload
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/rosters', methods=['GET'])
+def get_rosters():
+    try:
+        rosters = matchup_engine.rosters
+        return jsonify({
+            'status': 'success',
+            'rosters': rosters
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/matchup_data', methods=['GET'])
+def get_matchup_data():
+    try:
+        index = int(request.args.get('index', 0))
+        payload = matchup_engine.get_full_matchup_payload(index)
+        return jsonify({
+            'status': 'success',
+            'data': payload
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/matchup/calculate', methods=['POST'])
+def calculate_matchup_projections():
+    try:
+        data = request.get_json() or {}
+        team1_starters = data.get('team1_starters', [])
+        team2_starters = data.get('team2_starters', [])
+        summary = matchup_engine.compute_matchup_projections(team1_starters, team2_starters)
+        return jsonify({
+            'status': 'success',
+            'summary': summary
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/strategy_advice', methods=['POST'])
+def strategy_advice():
+    try:
+        data = request.get_json() or {}
+        rosters = data.get('rosters', {})
+        draft_log = data.get('draft_log', [])
+        all_players = data.get('all_players', [])
+        
+        engine = DraftStrategyEngine(all_players, rosters, draft_log, LEAGUE_TEAMS, my_team=MY_TEAM)
+        payload = engine.generate_strategy_payload()
+        
+        return jsonify({
+            'status': 'success',
+            'strategy': payload
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/players', methods=['GET'])
 def get_players():
@@ -313,7 +468,12 @@ def export_draft():
             }), 400
             
         df = pd.DataFrame(rows)
-        temp_path = "data/cache/draft_rosters_2026.csv"
+        if LEAGUE_CONFIG == '12_team_full_ppr':
+            temp_path = "data/cache/draft_rosters_12team_2026.csv"
+        elif LEAGUE_CONFIG == 'mafia':
+            temp_path = "data/cache/draft_rosters_private_2026.csv"
+        else:
+            temp_path = "data/cache/draft_rosters_2026.csv"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         df.to_csv(temp_path, index=False)
         

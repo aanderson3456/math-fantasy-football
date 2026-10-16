@@ -3,26 +3,44 @@ let allPlayers = [];
 let draftedPlayers = new Set(); // Set of player_name
 let rosters = {}; // Map of team_name -> [player_dicts]
 let draftLog = []; // Array of {player_name, team_name}
+let completedDraftData = null;
 
-const LEAGUE_TEAMS = [
-    'Jonathan Taylor Day', 'Hope Mahomes Still Standing', 'Lizard lizard lizard',
-    'MR. SNIFFLES', 'Why did I trade JSN?', 'No Mo Toe Joe',
-    'In My Football Era', 'Kittle Me This', 'Rippin Darts', 'Erica Loves Sports'
-];
+let LEAGUE_TEAMS = [];
+let MY_TEAM = '';
 
 // Initialize Rosters
-LEAGUE_TEAMS.forEach(team => {
-    rosters[team] = [];
-});
+function initializeRosters() {
+    rosters = {};
+    LEAGUE_TEAMS.forEach(team => {
+        rosters[team] = [];
+    });
+}
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initializeTabs();
     initializeOlineSliders();
-    fetchPlayers();
+    await fetchLeagueSettings();
+    initializeRosters();
+    await fetchPlayers();
+    await fetchCompletedDraft();
     setupDraftEvents();
     setupExportEvents();
     setupSimButton();
+    setupDraftFilterEvents();
 });
+
+async function fetchLeagueSettings() {
+    try {
+        const response = await fetch('/api/league_settings');
+        const res = await response.json();
+        if (res.status === 'success') {
+            LEAGUE_TEAMS = res.settings.league_teams;
+            MY_TEAM = res.settings.my_team;
+        }
+    } catch (e) {
+        console.error("Failed to load settings", e);
+    }
+}
 
 // 1. Navigation Tabs
 function initializeTabs() {
@@ -293,8 +311,9 @@ function executeDraft(playerName, teamName) {
     renderRosters();
     renderDraftLog();
     
-    // Automatically run playoff simulation in the background
+    // Automatically run playoff simulation and strategy in the background
     runPlayoffSimulation();
+    fetchStrategyAdvice();
 }
 
 function draftPlayerQuick(playerName) {
@@ -338,22 +357,169 @@ function undraftPlayer(playerName) {
             </div>
         `;
     }
+    fetchStrategyAdvice();
+}
+
+async function fetchCompletedDraft() {
+    try {
+        const response = await fetch('/api/completed_draft');
+        const res = await response.json();
+        if (res.status === 'success' && res.data) {
+            completedDraftData = res.data;
+            
+            // Populate drafted players and log
+            draftLog = completedDraftData.draft_log;
+            draftedPlayers.clear();
+            draftLog.forEach(pick => draftedPlayers.add(pick.player_name));
+            
+            // Fetch rosters
+            const rResp = await fetch('/api/rosters');
+            const rJson = await rResp.json();
+            if (rJson.status === 'success' && rJson.rosters) {
+                // Enrich roster players with stats if available
+                LEAGUE_TEAMS.forEach(team => {
+                    rosters[team] = (rJson.rosters[team] || []).map(rawP => {
+                        const matched = allPlayers.find(ap => ap.player_name.toLowerCase() === rawP.player_name.toLowerCase());
+                        return matched || {
+                            player_name: rawP.player_name,
+                            position: rawP.position,
+                            team_predict: rawP.nfl_team || 'UNK',
+                            prev_fantasy_points: 120.0,
+                            predicted_pts: 120.0
+                        };
+                    });
+                });
+            }
+
+            renderDraftGrades(completedDraftData.team_grades);
+            populateTeamFilterDropdown();
+            renderDraftResultsTable(completedDraftData.draft_log);
+            renderRosters();
+            renderCheatSheet();
+            runPlayoffSimulation();
+        }
+    } catch (e) {
+        console.error("Failed to load completed draft data", e);
+    }
+}
+
+function renderDraftGrades(grades) {
+    const grid = document.getElementById('draft-grades-grid');
+    if (!grid || !grades) return;
+    grid.innerHTML = '';
+
+    grades.forEach(t => {
+        const card = document.createElement('div');
+        card.className = `grade-card ${t.is_my_team ? 'my-team-card' : ''}`;
+        
+        let gradeClass = 'grade-b';
+        if (t.grade.startsWith('A')) gradeClass = 'grade-a';
+        else if (t.grade.startsWith('C')) gradeClass = 'grade-c';
+
+        card.innerHTML = `
+            <div class="grade-card-header">
+                <span class="grade-team-name">${t.rank}. ${t.team_name}</span>
+                <span class="grade-badge-pill ${gradeClass}">${t.grade}</span>
+            </div>
+            <div class="grade-meta-row">
+                <span><strong>VORP:</strong> ${t.total_vorp > 0 ? '+'+t.total_vorp : t.total_vorp}</span>
+                <span><strong>Proj Pts:</strong> ${t.total_pts}</span>
+            </div>
+            <div class="grade-steals-box">
+                <span class="steal-text"><i class="fa-solid fa-gem"></i> Steal: ${t.best_steal ? t.best_steal.player_name + ' (Pick ' + t.best_steal.overall_pick + ')' : 'N/A'}</span>
+                <span class="reach-text"><i class="fa-solid fa-arrow-trend-down"></i> Reach: ${t.biggest_reach ? t.biggest_reach.player_name + ' (Pick ' + t.biggest_reach.overall_pick + ')' : 'N/A'}</span>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function populateTeamFilterDropdown() {
+    const filterSelect = document.getElementById('draft-filter-team');
+    if (!filterSelect) return;
+    filterSelect.innerHTML = '<option value="ALL">All 12 Teams</option>';
+    LEAGUE_TEAMS.forEach(team => {
+        const opt = document.createElement('option');
+        opt.value = team;
+        opt.textContent = team;
+        filterSelect.appendChild(opt);
+    });
+}
+
+function renderDraftResultsTable(log) {
+    const tbody = document.getElementById('draft-results-tbody');
+    if (!tbody || !log) return;
+    tbody.innerHTML = '';
+
+    const searchTerm = (document.getElementById('draft-search-input')?.value || '').toLowerCase().trim();
+    const teamFilter = document.getElementById('draft-filter-team')?.value || 'ALL';
+
+    const filtered = log.filter(p => {
+        const matchSearch = !searchTerm || p.player_name.toLowerCase().includes(searchTerm) || p.fantasy_team.toLowerCase().includes(searchTerm) || p.position.toLowerCase().includes(searchTerm);
+        const matchTeam = (teamFilter === 'ALL') || (p.fantasy_team === teamFilter);
+        return matchSearch && matchTeam;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">No draft picks matching your filter.</td></tr>`;
+        return;
+    }
+
+    filtered.forEach(p => {
+        const tr = document.createElement('tr');
+        if (p.is_my_pick) tr.classList.add('my-pick-row');
+
+        tr.innerHTML = `
+            <td><strong class="font-mono">#${p.overall_pick}</strong></td>
+            <td><span class="text-secondary">Round ${p.round} (${p.pick_in_round})</span></td>
+            <td>
+                <strong>${p.player_name}</strong>
+                <span class="badge pos-${p.position}" style="margin-left: 6px;">${p.position}</span>
+                <span class="text-secondary" style="font-size: 11px; margin-left: 4px;">${p.nfl_team}</span>
+            </td>
+            <td>
+                <span class="${p.is_my_pick ? 'text-success font-bold' : ''}">
+                    ${p.is_my_pick ? '<i class="fa-solid fa-star text-warning"></i> ' : ''}${p.fantasy_team}
+                </span>
+            </td>
+            <td><span class="font-mono font-bold text-accent">${p.nn_proj_pts.toFixed(1)}</span></td>
+            <td><span class="font-mono">${p.nn_vorp > 0 ? '+'+p.nn_vorp.toFixed(1) : p.nn_vorp.toFixed(1)}</span></td>
+            <td>
+                <span style="font-size: 12px;">
+                    <strong class="text-accent">NN:</strong> #${p.nn_adp.toFixed(0)} 
+                    <span class="text-secondary">|</span> 
+                    <strong style="color: #c084fc;">Yahoo:</strong> #${p.yahoo_adp.toFixed(0)}
+                </span>
+            </td>
+            <td>
+                <span class="val-badge val-${p.val_type}">${p.val_badge}</span>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function setupDraftFilterEvents() {
+    const searchInput = document.getElementById('draft-search-input');
+    const teamSelect = document.getElementById('draft-filter-team');
+
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            if (completedDraftData) renderDraftResultsTable(completedDraftData.draft_log);
+        });
+    }
+
+    if (teamSelect) {
+        teamSelect.addEventListener('change', () => {
+            if (completedDraftData) renderDraftResultsTable(completedDraftData.draft_log);
+        });
+    }
 }
 
 function renderDraftLog() {
-    const logList = document.getElementById('draft-log-list');
-    logList.innerHTML = '';
-    
-    if (draftLog.length === 0) {
-        logList.innerHTML = '<li class="log-placeholder">No picks recorded yet.</li>';
-        return;
+    if (completedDraftData) {
+        renderDraftResultsTable(completedDraftData.draft_log);
     }
-    
-    draftLog.forEach((pick, i) => {
-        const li = document.createElement('li');
-        li.innerHTML = `Pick ${i+1}: <strong>${pick.player_name}</strong> drafted to <em>${pick.team_name}</em>`;
-        logList.appendChild(li);
-    });
 }
 
 function renderRosters() {
@@ -512,4 +678,94 @@ document.addEventListener('click', () => {
         menu.classList.add('hidden');
     });
 });
+
+// Strategy Engine Polling
+async function fetchStrategyAdvice() {
+    try {
+        const response = await fetch('/api/strategy_advice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                rosters: rosters,
+                draft_log: draftLog,
+                all_players: allPlayers
+            })
+        });
+        const res = await response.json();
+        if (res.status === 'success') {
+            renderStrategyAdvice(res.strategy);
+        }
+    } catch (e) {
+        console.error("Failed to fetch strategy advice", e);
+    }
+}
+
+function renderStrategyAdvice(strategy) {
+    document.getElementById('strat-current-pick').textContent = strategy.current_pick;
+    document.getElementById('strat-current-round').textContent = strategy.current_round;
+    document.getElementById('strat-on-clock').textContent = strategy.team_on_clock;
+    
+    const untilTurnStr = strategy.is_my_turn ? "ON THE CLOCK!" : 
+                        (strategy.picks_until_my_turn === -1 ? "N/A" : strategy.picks_until_my_turn);
+    const untilSpan = document.getElementById('strat-picks-until');
+    untilSpan.textContent = untilTurnStr;
+    if (strategy.is_my_turn) {
+        untilSpan.style.color = '#69BE28';
+        untilSpan.style.fontWeight = 'bold';
+    } else {
+        untilSpan.style.color = 'inherit';
+        untilSpan.style.fontWeight = 'inherit';
+    }
+    
+    const needsCounts = strategy.roster_needs.counts || {};
+    const needsList = strategy.roster_needs.needs || [];
+    let needsHtml = `
+        <div style="display:flex; gap: 10px; margin-bottom:10px;">
+            <span class="badge pos-QB">QB: ${needsCounts.QB||0}</span>
+            <span class="badge pos-RB">RB: ${needsCounts.RB||0}</span>
+            <span class="badge pos-WR">WR: ${needsCounts.WR||0}</span>
+            <span class="badge pos-TE">TE: ${needsCounts.TE||0}</span>
+        </div>
+        <p><strong>Primary Needs:</strong> ${needsList.join(', ') || 'None (Best Player Available)'}</p>
+    `;
+    document.getElementById('strat-needs-text').innerHTML = needsHtml;
+    
+    const warningsPanel = document.getElementById('strategy-warnings-panel');
+    if (strategy.tier_warnings && strategy.tier_warnings.length > 0) {
+        warningsPanel.innerHTML = strategy.tier_warnings.map(w => `
+            <div class="strategy-warning-card">
+                <i class="fa-solid fa-triangle-exclamation"></i> ${w}
+            </div>
+        `).join('');
+    } else {
+        warningsPanel.innerHTML = '';
+    }
+    
+    const recsPanel = document.getElementById('strategy-recs-panel');
+    if (strategy.recommendations && strategy.recommendations.length > 0) {
+        recsPanel.innerHTML = strategy.recommendations.map(r => {
+            const p = r.player;
+            const escapedName = p.player_name.replace(/'/g, "\\'");
+            return `
+                <div class="strategy-rec-card">
+                    <div class="rec-header">
+                        <h4>${p.player_name} <span class="badge pos-${p.position}">${p.position}</span></h4>
+                        <span class="rec-reason-badge">${r.reason_title}</span>
+                    </div>
+                    <p class="rec-desc">${r.reason}</p>
+                    <div class="rec-meta">
+                        <span><strong>Pts:</strong> ${p.predicted_pts.toFixed(1)}</span>
+                        <span><strong>VORP:</strong> ${p.vorp > 0 ? '+'+p.vorp.toFixed(1) : p.vorp.toFixed(1)}</span>
+                        <span><strong>ADP:</strong> ${p.predicted_adp.toFixed(1)}</span>
+                    </div>
+                    <button class="btn btn-primary btn-small" onclick="executeDraft('${escapedName}', '${MY_TEAM}')" style="margin-top:10px; width:100%;">
+                        <i class="fa-solid fa-plus"></i> Draft to My Team
+                    </button>
+                </div>
+            `;
+        }).join('');
+    } else {
+        recsPanel.innerHTML = '<div class="roster-empty">No recommendations available.</div>';
+    }
+}
 

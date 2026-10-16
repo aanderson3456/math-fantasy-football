@@ -1,0 +1,45 @@
+steps:
+  # Step 1: Install dependencies and fetch fresh Yahoo Matchup Data
+  - name: 'python:3.12-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install requests beautifulsoup4 pandas
+        python src/daily_yahoo_sync.py
+
+  # Step 2: Build the Container Image (bakes in the fresh data & models)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/fantasy-suite:latest', '.']
+
+  # Step 3: Push Image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/fantasy-suite:latest']
+
+  # Step 4: Deploy Mafia (10-team)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mafia-draft'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/fantasy-suite:latest'
+      - '--region'
+      - 'us-central1'
+      - '--set-env-vars'
+      - 'LEAGUE_CONFIG=mafia,SITE_PASSWORD=mafiadraft'
+      
+  # Step 5: Deploy 12-team
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'fantasy-draft-suite-12team'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/fantasy-suite:latest'
+      - '--region'
+      - 'us-central1'
+      - '--set-env-vars'
+      - 'LEAGUE_CONFIG=12_team_full_ppr,SITE_PASSWORD=tittybar'

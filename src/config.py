@@ -6,7 +6,13 @@ END_YEAR = 2025
 PREDICT_YEAR = 2026
 
 # Number of teams in the league (used for VORP calculations)
-NUM_TEAMS = 10
+LEAGUE_CONFIG = os.environ.get('LEAGUE_CONFIG', 'default')
+if LEAGUE_CONFIG == '12_team_full_ppr':
+    NUM_TEAMS = 12
+elif LEAGUE_CONFIG == 'mafia':
+    NUM_TEAMS = 10
+else:
+    NUM_TEAMS = 10
 
 # Cache directories for downloaded raw data
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,7 +69,9 @@ def standardize_team(team_str):
     standardized = TEAM_MAPPING.get(team_str.upper(), None)
     if standardized:
         return standardized
-    return team_str.upper()[:3]
+    if team_str.upper() in TEAM_MAPPING.values():
+        return team_str.upper()
+    return 'UNK'
 
 # Manual team O-line quality adjustments for PREDICT_YEAR
 # Keys are team abbreviations (standardized), values are adjustment offsets to oline_score
