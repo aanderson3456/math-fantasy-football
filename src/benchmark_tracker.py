@@ -76,6 +76,27 @@ class BrierBenchmarkTracker:
             return pd.read_parquet(PREDS_PATH)
         raise FileNotFoundError("NN predictions not found. Run training/inference first.")
 
+    @staticmethod
+    def _load_weekly_nn_lookup(league, week):
+        """Per-game projections from the weekly two-branch NN (src/weekly_model.py), if generated."""
+        path = os.path.join(CACHE_DIR, f'nn_weekly_preds_{league}_w{week}.parquet')
+        if not os.path.exists(path):
+            return None
+        df = pd.read_parquet(path)
+        lookup = {}
+        for _, row in df.iterrows():
+            mu = row.get(f'nn2_{league}')
+            if pd.isna(mu):
+                continue
+            lookup[normalize_name(row['player_name'])] = {
+                'player_name': row['player_name'],
+                'position': str(row['pos']),
+                'team': str(row.get('team', 'UNK')),
+                'nn_proj_pts': float(mu),
+                'nn_proj_std': float(row.get(f'nn2_sigma_{league}', mu * 0.35)),
+            }
+        return lookup
+
     def record_weekly_projections(self, week, yahoo_projections, nn_predictions_df=None, league=None):
         """
         Records/updates pre-game projections from both Yahoo and the Neural Network for all players.
@@ -83,15 +104,20 @@ class BrierBenchmarkTracker:
         league: league config key ('mafia' or '12_team_full_ppr'); NN projections come from that league's model.
         """
         league = league or default_league()
-        if nn_predictions_df is None:
+        weekly_lookup = self._load_weekly_nn_lookup(league, week) if nn_predictions_df is None else None
+        if weekly_lookup is None and nn_predictions_df is None:
             nn_predictions_df = self._load_nn_predictions(league)
 
         from src.injury_service import InjuryAvailabilityService
         inj_service = InjuryAvailabilityService(season=self.season)
 
-        # Build fast lookup for NN
-        nn_lookup = {}
-        for _, row in nn_predictions_df.iterrows():
+        # Build fast lookup for NN: weekly two-branch model if available, else season total / 17
+        if weekly_lookup is not None:
+            nn_lookup = weekly_lookup
+            print(f"[{league}] Using weekly two-branch NN projections for Week {week}.")
+        else:
+            nn_lookup = {}
+        for _, row in (nn_predictions_df.iterrows() if weekly_lookup is None else []):
             cname = normalize_name(row['player_name'])
             # Convert full season points to weekly projection (17-game season)
             weekly_nn = float(row['predicted_pts']) / GAMES_PER_SEASON
@@ -144,7 +170,8 @@ class BrierBenchmarkTracker:
             team = team if team not in ('UNK', None) else nn_info['team']
 
             mult = inj_service.get_availability_multiplier(team=team, week=week, status=y.get('status'))
-            if y_proj == 0.0 and (mult == 0.0 or y.get('status') in ['IR', 'OUT', 'PUP', 'O']):
+            if y_proj == 0.0 or mult == 0.0:
+                # Yahoo projecting 0 means bye/OUT/IR; the NN has no availability signal of its own
                 nn_proj = 0.0
             else:
                 nn_proj = nn_proj * mult
@@ -229,15 +256,13 @@ class BrierBenchmarkTracker:
                 # Brier Score on 'Boom' event (e.g. Scoring >= 15.0 pts)
                 boom_threshold = 15.0
                 actual_boom = 1.0 if act >= boom_threshold else 0.0
-                
-                # Probability estimate: Gaussian CDF proxy P(X >= 15)
-                # For Yahoo: range proxy (Max - Min)
-                y_range = max(1.0, self.history.at[idx, 'yahoo_proj_max'] - self.history.at[idx, 'yahoo_proj_min'])
-                prob_boom_yahoo = np.clip((y_p - 5.0) / 20.0, 0.05, 0.95)
-                
-                # For NN: based on projected mean and std
+
+                # Probability estimate: Gaussian P(X >= 15) around each source's projection.
+                # Both sources share the same spread (the NN's per-player sigma), so the Brier
+                # gap measures only which projection is better centered.
                 nn_std = max(1.0, self.history.at[idx, 'nn_proj_std'])
                 from scipy.stats import norm as sp_norm
+                prob_boom_yahoo = 1.0 - sp_norm.cdf(boom_threshold, loc=y_p, scale=nn_std)
                 prob_boom_nn = 1.0 - sp_norm.cdf(boom_threshold, loc=nn_p, scale=nn_std)
 
                 brier_nn = (prob_boom_nn - actual_boom) ** 2
@@ -279,8 +304,11 @@ class BrierBenchmarkTracker:
                         actuals[n] = p['actual_pts']
                     if n not in seen:
                         seen.add(n)
+                        # status is omitted on purpose: on a back-filled week Yahoo shows the
+                        # player's tag on the scrape date, not on game day. A 0 Yahoo projection
+                        # already marks bye/OUT players.
                         projs.append({'player_name': n, 'pos': p.get('pos', 'UNK'), 'team': p.get('team', 'UNK'),
-                                      'proj_pts': p.get('yahoo_proj', 0.0), 'status': p.get('status')})
+                                      'proj_pts': p.get('yahoo_proj', 0.0), 'status': None})
         if not projs:
             print(f"[{league}] No players in {path}.")
             return False

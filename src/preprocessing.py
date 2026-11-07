@@ -132,7 +132,7 @@ def load_roster_data():
     return roster_map
 
 def load_aggregate_player_stats():
-    """Loads player stats parquet, aggregates per-season, and calculates Half-PPR fantasy points."""
+    """Loads player stats parquet, aggregates per-season, and calculates fantasy points under the LEAGUE_CONFIG league's rules."""
     print("Loading and aggregating player statistics...")
     filepath = os.path.join(CACHE_DIR, "player_stats.parquet")
     if not os.path.exists(filepath):
@@ -160,27 +160,13 @@ def load_aggregate_player_stats():
         if col in df.columns:
             df[col] = df[col].fillna(0.0)
             
-    # Calculate fumbles lost
-    fumbles_lost = 0
-    for col in ['rushing_fumbles_lost', 'receiving_fumbles_lost', 'sack_fumbles_lost']:
-        if col in df.columns:
-            fumbles_lost += df[col]
-    df['fumbles_lost'] = fumbles_lost
-    
-    # Calculate fantasy points based on LEAGUE_CONFIG
-    reception_points = 1.0 if LEAGUE_CONFIG == '12_team_full_ppr' else 0.5
-    
-    df['calculated_fantasy_points'] = (
-        df['passing_yards'] * 0.04 + 
-        df['passing_tds'] * 4.0 - 
-        df['interceptions'] * 2.0 + 
-        df['rushing_yards'] * 0.1 + 
-        df['rushing_tds'] * 6.0 + 
-        df['receptions'] * reception_points + 
-        df['receiving_yards'] * 0.1 + 
-        df['receiving_tds'] * 6.0 - 
-        df['fumbles_lost'] * 2.0
-    )
+    # Fumbles lost, 2-pt conversions, return yards, completions (see src/scoring.py)
+    from src.scoring import harmonize_stats, league_points
+    df = harmonize_stats(df)
+
+    # Fantasy points under this league's exact Yahoo scoring rules (recovered from
+    # Yahoo actuals; the 12-team league pays 0.5/completion and 6-pt passing TDs)
+    df['calculated_fantasy_points'] = league_points(df, LEAGUE_CONFIG)
     
     # Group by player and season
     agg_df = df.groupby(['player_id', 'player_name', 'position', 'recent_team', 'season']).agg(

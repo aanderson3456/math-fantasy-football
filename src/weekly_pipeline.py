@@ -139,8 +139,26 @@ def run_weekly_postgame_pipeline(week_completed):
     else:
         print("No players found to fine-tune on.")
 
-    # 4. Next Week Kickoff
+    # 4. Weekly two-branch NN: refresh 2026 box scores, refit through the completed week, and
+    #    project the next week for both leagues (src/weekly_model.py)
     next_week = week_completed + 1
+    print(f"\n--- WEEKLY TWO-BRANCH NN: REFIT THROUGH WEEK {week_completed}, PROJECT WEEK {next_week} ---")
+    try:
+        import urllib.request
+        url = "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet"
+        urllib.request.urlretrieve(url, os.path.join(CACHE_DIR, 'player_stats_2026.parquet'))
+        url = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.parquet"
+        urllib.request.urlretrieve(url, os.path.join(CACHE_DIR, 'games.parquet'))
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, 'src', 'daily_yahoo_sync.py'), '--week', str(next_week)],
+                       capture_output=True, text=True)
+        res = subprocess.run([sys.executable, os.path.join(BASE_DIR, 'src', 'weekly_model.py'),
+                              '--train', '--through', '2026', str(week_completed), '--predict', '2026', str(next_week)],
+                             capture_output=True, text=True)
+        print(res.stdout.strip()[-1500:] or res.stderr.strip()[-1500:])
+    except Exception as e:
+        print(f"Weekly NN refresh failed: {e}")
+
+    # 5. Next Week Kickoff
     print(f"\nWeek {next_week} pipeline primed! Projections will lock before Thursday Night Football.")
 
 if __name__ == '__main__':
