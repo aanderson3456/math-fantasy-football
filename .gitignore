@@ -8,6 +8,12 @@ env.bak/
 venv.bak/
 cookie.txt
 
+# Generated / scratch artifacts
+scratch.py
+scoreboard.html
+executed_notebook.ipynb
+rosters_dump.txt
+prestige_rosters_dump.txt
 
 # Python
 __pycache__/

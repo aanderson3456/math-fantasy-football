@@ -7,14 +7,26 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 CACHE_DIR = os.path.join(DATA_DIR, 'cache')
 BENCHMARK_DIR = os.path.join(DATA_DIR, 'benchmark')
-PREDS_PATH = os.path.join(CACHE_DIR, 'live_12team_predictions.parquet')
+PREDS_PATH = os.path.join(CACHE_DIR, 'live_12team_predictions.parquet')  # legacy fallback
 HISTORY_PATH = os.path.join(BENCHMARK_DIR, 'prediction_history.parquet')
 HISTORY_CSV = os.path.join(BENCHMARK_DIR, 'prediction_history.csv')
 
+LEAGUES = ['mafia', '12_team_full_ppr']
+GAMES_PER_SEASON = 17.0
+
 os.makedirs(BENCHMARK_DIR, exist_ok=True)
+
+def league_preds_path(league):
+    return os.path.join(CACHE_DIR, f'nn_preds_{league}.parquet')
+
+def default_league():
+    lc = os.environ.get('LEAGUE_CONFIG', 'mafia')
+    return lc if lc in LEAGUES else 'mafia'
 
 def normalize_name(name):
     name = str(name).lower()
@@ -30,38 +42,59 @@ class BrierBenchmarkTracker:
 
     def load_history(self):
         if os.path.exists(HISTORY_PATH):
-            return pd.read_parquet(HISTORY_PATH)
+            df = pd.read_parquet(HISTORY_PATH)
         elif os.path.exists(HISTORY_CSV):
-            return pd.read_csv(HISTORY_CSV)
-        return pd.DataFrame(columns=[
-            'season', 'week', 'player_name', 'clean_name', 'position', 'team',
-            'yahoo_proj_pts', 'yahoo_proj_min', 'yahoo_proj_max',
-            'nn_proj_pts', 'nn_proj_std',
-            'actual_pts', 'nn_abs_error', 'yahoo_abs_error', 'nn_sq_error', 'yahoo_sq_error',
-            'nn_closer', 'brier_boom_nn', 'brier_boom_yahoo', 'is_scored'
-        ])
+            df = pd.read_csv(HISTORY_CSV)
+        else:
+            df = pd.DataFrame(columns=[
+                'season', 'week', 'league', 'player_name', 'clean_name', 'position', 'team',
+                'yahoo_proj_pts', 'yahoo_proj_min', 'yahoo_proj_max',
+                'nn_proj_pts', 'nn_proj_std',
+                'actual_pts', 'nn_abs_error', 'yahoo_abs_error', 'nn_sq_error', 'yahoo_sq_error',
+                'nn_closer', 'brier_boom_nn', 'brier_boom_yahoo', 'is_scored'
+            ])
+        if 'league' not in df.columns:
+            df['league'] = 'unknown'  # pre-league-column rows
+        return df
 
     def save_history(self):
         self.history.to_parquet(HISTORY_PATH, index=False)
         self.history.to_csv(HISTORY_CSV, index=False)
 
-    def record_weekly_projections(self, week, yahoo_projections, nn_predictions_df=None):
+    def _week_mask(self, week, league):
+        return ((self.history['season'] == self.season) & (self.history['week'] == week)
+                & (self.history['league'] == league))
+
+    @staticmethod
+    def _load_nn_predictions(league):
+        path = league_preds_path(league)
+        if os.path.exists(path):
+            return pd.read_parquet(path)
+        if os.path.exists(PREDS_PATH):
+            print(f"Warning: {path} missing; falling back to {PREDS_PATH}. "
+                  f"Run: LEAGUE_CONFIG={league} python src/generate_league_predictions.py")
+            return pd.read_parquet(PREDS_PATH)
+        raise FileNotFoundError("NN predictions not found. Run training/inference first.")
+
+    def record_weekly_projections(self, week, yahoo_projections, nn_predictions_df=None, league=None):
         """
         Records/updates pre-game projections from both Yahoo and the Neural Network for all players.
         yahoo_projections: list of dicts [{'name': '...', 'pos': '...', 'team': '...', 'proj': 15.2, 'min': 8.0, 'max': 22.0}]
+        league: league config key ('mafia' or '12_team_full_ppr'); NN projections come from that league's model.
         """
+        league = league or default_league()
         if nn_predictions_df is None:
-            if os.path.exists(PREDS_PATH):
-                nn_predictions_df = pd.read_parquet(PREDS_PATH)
-            else:
-                raise FileNotFoundError("NN predictions not found. Run training/inference first.")
+            nn_predictions_df = self._load_nn_predictions(league)
+
+        from src.injury_service import InjuryAvailabilityService
+        inj_service = InjuryAvailabilityService(season=self.season)
 
         # Build fast lookup for NN
         nn_lookup = {}
         for _, row in nn_predictions_df.iterrows():
             cname = normalize_name(row['player_name'])
-            # Convert full season points to weekly projection (divide by 16 games)
-            weekly_nn = float(row['predicted_pts']) / 16.0
+            # Convert full season points to weekly projection (17-game season)
+            weekly_nn = float(row['predicted_pts']) / GAMES_PER_SEASON
             weekly_std = weekly_nn * 0.35  # Standard deviation heuristic
             nn_lookup[cname] = {
                 'player_name': row['player_name'],
@@ -72,6 +105,7 @@ class BrierBenchmarkTracker:
             }
 
         records = []
+        unmatched = []
         for y in yahoo_projections:
             pname = y.get('player_name') or y.get('name')
             cname = normalize_name(pname)
@@ -82,31 +116,33 @@ class BrierBenchmarkTracker:
             y_max = float(y.get('proj_max', y.get('max', y_proj * 1.5)))
 
             nn_info = nn_lookup.get(cname)
+            if not nn_info and pos == 'DEF' and team not in ('UNK', None):
+                # Yahoo names defenses by nickname ("Seahawks"); NN file uses "SEA DEF"
+                nn_info = nn_lookup.get(normalize_name(f"{team} DEF"))
             if not nn_info:
-                # Fuzzy matching fallback
-                for k, v in nn_lookup.items():
-                    if len(k) >= 5 and (k in cname or cname in k):
-                        nn_info = v
-                        break
-            if not nn_info:
-                # Initial + last name matching
+                # Initial + last name matching (position must agree when known)
                 parts = cname.split()
                 if len(parts) >= 2:
                     init = parts[0][0]
                     last = parts[-1]
                     for k, v in nn_lookup.items():
                         k_parts = k.split()
-                        if len(k_parts) >= 2 and k_parts[-1] == last and k_parts[0][0] == init:
+                        if (len(k_parts) >= 2 and k_parts[-1] == last and k_parts[0][0] == init
+                                and (pos in ('UNK', None) or v['position'] == pos)):
                             nn_info = v
                             break
 
-            if nn_info:
-                nn_proj = nn_info['nn_proj_pts']
-                nn_std = nn_info['nn_proj_std']
-                pos = nn_info['position'] if pos == 'UNK' else pos
-                team = nn_info['team'] if team == 'UNK' else team
-            from src.injury_service import InjuryAvailabilityService
-            inj_service = InjuryAvailabilityService(season=self.season)
+            if not nn_info:
+                # No NN projection for this player (e.g. K, rookies not in feature set).
+                unmatched.append(pname)
+                continue
+
+            nn_proj = nn_info['nn_proj_pts']
+            nn_std = nn_info['nn_proj_std']
+            # NN file positions are authoritative; Yahoo-derived ones were historically regex-parsed
+            pos = nn_info['position'] if nn_info['position'] not in ('', 'None', 'nan') else pos
+            team = team if team not in ('UNK', None) else nn_info['team']
+
             mult = inj_service.get_availability_multiplier(team=team, week=week, status=y.get('status'))
             if y_proj == 0.0 and (mult == 0.0 or y.get('status') in ['IR', 'OUT', 'PUP', 'O']):
                 nn_proj = 0.0
@@ -116,6 +152,7 @@ class BrierBenchmarkTracker:
             records.append({
                 'season': self.season,
                 'week': week,
+                'league': league,
                 'player_name': pname,
                 'clean_name': cname,
                 'position': pos,
@@ -138,24 +175,26 @@ class BrierBenchmarkTracker:
 
         new_df = pd.DataFrame(records)
         if len(self.history) > 0:
-            # Remove existing entries for this season and week
-            filtered = self.history[~((self.history['season'] == self.season) & (self.history['week'] == week))]
+            # Remove existing entries for this season, week and league
+            filtered = self.history[~self._week_mask(week, league)]
             self.history = pd.concat([filtered, new_df], ignore_index=True)
         else:
             self.history = new_df
 
         self.save_history()
-        print(f"Recorded {len(new_df)} player projections for Week {week} (Season {self.season}).")
+        print(f"[{league}] Recorded {len(new_df)} player projections for Week {week} (Season {self.season}); "
+              f"{len(unmatched)} without an NN projection.")
         return len(new_df)
 
-    def record_weekly_actuals(self, week, actuals_dict):
+    def record_weekly_actuals(self, week, actuals_dict, league=None):
         """
         Updates actual fantasy points scored for week and computes error/Brier metrics.
-        actuals_dict: {'player_name': actual_points}
+        actuals_dict: {'player_name': actual_points}  (must be in the given league's scoring)
         """
-        mask = (self.history['season'] == self.season) & (self.history['week'] == week)
+        league = league or default_league()
+        mask = self._week_mask(week, league)
         if not mask.any():
-            print(f"No projections found for Week {week}. Record projections first.")
+            print(f"[{league}] No projections found for Week {week}. Record projections first.")
             return
 
         # Normalization lookup for incoming actuals
@@ -166,12 +205,6 @@ class BrierBenchmarkTracker:
         for idx in self.history[mask].index:
             cname = self.history.at[idx, 'clean_name']
             act = norm_actuals.get(cname)
-            if act is None:
-                # Fuzzy check
-                for k, v in norm_actuals.items():
-                    if len(k) >= 5 and (k in cname or cname in k):
-                        act = v
-                        break
             if act is None:
                 # Initial + last name matching
                 parts = cname.split()
@@ -221,19 +254,58 @@ class BrierBenchmarkTracker:
                 self.history.at[idx, 'is_scored'] = True
 
         self.save_history()
-        print(f"Updated actual scores and computed Brier metrics for Week {week}.")
+        print(f"[{league}] Updated actual scores and computed Brier metrics for Week {week}.")
 
-    def generate_evaluation_report(self, week=None):
+    def ingest_matchup_file(self, week, league):
+        """
+        Records projections + actuals for a league/week from the cached Yahoo matchup dump
+        (data/cache/yahoo_week{week}_all_matchups_{league}.json written by daily_yahoo_sync).
+        Projections and actuals come from the same league, so scoring formats always match.
+        """
+        path = os.path.join(CACHE_DIR, f'yahoo_week{week}_all_matchups_{league}.json')
+        if not os.path.exists(path):
+            print(f"[{league}] {path} not found; run daily_yahoo_sync --week {week} first.")
+            return False
+        with open(path, 'r') as f:
+            matchups = json.load(f)
+        projs, actuals, seen = [], {}, set()
+        for m in matchups:
+            for side in ['team1', 'team2']:
+                for p in m[side]['starters'] + m[side]['bench']:
+                    n = p.get('player_name')
+                    if not n:
+                        continue
+                    if 'actual_pts' in p:
+                        actuals[n] = p['actual_pts']
+                    if n not in seen:
+                        seen.add(n)
+                        projs.append({'player_name': n, 'pos': p.get('pos', 'UNK'), 'team': p.get('team', 'UNK'),
+                                      'proj_pts': p.get('yahoo_proj', 0.0), 'status': p.get('status')})
+        if not projs:
+            print(f"[{league}] No players in {path}.")
+            return False
+        self.record_weekly_projections(week, projs, league=league)
+        if actuals:
+            self.record_weekly_actuals(week, actuals, league=league)
+        return True
+
+    def generate_evaluation_report(self, week=None, league=None):
         """
         Generates the comprehensive accuracy & Brier score report (week-by-week and cumulative).
+        league: restrict to one league config; None = all leagues combined.
         """
         df = self.history[self.history['is_scored'] == True].copy()
+        if league is not None:
+            df = df[df['league'] == league]
         if len(df) == 0:
             print("No scored game weeks recorded yet. Projections are queued.")
             return self.get_queued_projections_summary()
 
         if week is not None:
             df = df[df['week'] == week]
+            if len(df) == 0:
+                return {'season': self.season, 'week': week, 'league': league or 'all',
+                        'status': f'No scored data for Week {week}'}
 
         total_players = len(df)
         nn_wins = df['nn_closer'].sum()
@@ -273,6 +345,7 @@ class BrierBenchmarkTracker:
         report = {
             'season': self.season,
             'week': week or 'Season Cumulative',
+            'league': league or 'all',
             'total_evaluated_players': total_players,
             'nn_closer_count': int(nn_wins),
             'yahoo_closer_count': int(yahoo_wins),
@@ -290,7 +363,7 @@ class BrierBenchmarkTracker:
         return report
 
     def get_queued_projections_summary(self):
-        queued = self.history.groupby(['season', 'week']).agg(
+        queued = self.history.groupby(['season', 'week', 'league']).agg(
             total_players=('player_name', 'count'),
             avg_nn_proj=('nn_proj_pts', 'mean'),
             avg_yahoo_proj=('yahoo_proj_pts', 'mean')
@@ -303,11 +376,17 @@ class BrierBenchmarkTracker:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Brier Score & Prediction Accuracy Tracker")
     parser.add_argument('--init_week', type=int, help='Initialize weekly projections from saved Yahoo dump')
+    parser.add_argument('--ingest_week', type=int, help='Record projections+actuals from cached Yahoo matchup JSON')
+    parser.add_argument('--league', choices=LEAGUES, help='League config (default: $LEAGUE_CONFIG or mafia)')
     parser.add_argument('--report', action='store_true', help='Generate accuracy and Brier score report')
     parser.add_argument('--week', type=int, help='Filter report by week')
     args = parser.parse_args()
 
     tracker = BrierBenchmarkTracker()
+
+    if args.ingest_week:
+        for lg in ([args.league] if args.league else LEAGUES):
+            tracker.ingest_matchup_file(args.ingest_week, lg)
 
     if args.init_week:
         # Load from saved Yahoo dump
@@ -346,9 +425,9 @@ if __name__ == '__main__':
                     s_max = float(parts[4]) if len(parts) > 4 else s_proj * 1.3
                     s_min = float(parts[5]) if len(parts) > 5 else s_proj * 0.7
                     # Convert to weekly rate
-                    w_proj = s_proj / 16.0
-                    w_max = s_max / 16.0
-                    w_min = s_min / 16.0
+                    w_proj = s_proj / GAMES_PER_SEASON
+                    w_max = s_max / GAMES_PER_SEASON
+                    w_min = s_min / GAMES_PER_SEASON
 
                     yahoo_projs.append({
                         'player_name': pname,
@@ -362,8 +441,8 @@ if __name__ == '__main__':
             idx += 1
 
         print(f"Parsed {len(yahoo_projs)} player projections from Yahoo dump.")
-        tracker.record_weekly_projections(args.init_week, yahoo_projs)
+        tracker.record_weekly_projections(args.init_week, yahoo_projs, league=args.league)
 
     if args.report:
-        rep = tracker.generate_evaluation_report(week=args.week)
-        print(json.dumps(rep, indent=2))
+        rep = tracker.generate_evaluation_report(week=args.week, league=args.league)
+        print(json.dumps(rep, indent=2, default=str))

@@ -27,9 +27,11 @@ class InjuryAvailabilityService:
         """
         if self.games_df is None or len(self.games_df) == 0:
             return set()
+        from src.config import standardize_team
         w_games = self.games_df[self.games_df['week'] == week]
         playing = set(w_games['home_team'].unique()) | set(w_games['away_team'].unique())
-        return self._all_nfl_teams - playing
+        # Standardize so nflverse codes (e.g. 'LA') match Yahoo-derived codes (e.g. 'LAR')
+        return {standardize_team(t) for t in (self._all_nfl_teams - playing)}
 
     def get_availability_multiplier(self, team, week, status=None):
         """

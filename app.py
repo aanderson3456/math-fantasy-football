@@ -214,10 +214,13 @@ def benchmark_view():
 @app.route('/api/benchmark', methods=['GET'])
 def get_benchmark_report():
     try:
-        from src.benchmark_tracker import BrierBenchmarkTracker
+        from src.benchmark_tracker import BrierBenchmarkTracker, LEAGUES
         week = request.args.get('week', type=int)
+        league = request.args.get('league') or (LEAGUE_CONFIG if LEAGUE_CONFIG in LEAGUES else None)
+        if league == 'all':
+            league = None
         tracker = BrierBenchmarkTracker()
-        report = tracker.generate_evaluation_report(week=week)
+        report = tracker.generate_evaluation_report(week=week, league=league)
         return jsonify({
             'status': 'success',
             'report': report

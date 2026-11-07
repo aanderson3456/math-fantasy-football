@@ -43,51 +43,23 @@ def run_weekly_postgame_pipeline(week_completed):
     """
     print(f"=== TUESDAY PIPELINE: PROCESSING COMPLETED WEEK {week_completed} ===")
     
-    # 1. Ingest projections and actuals into benchmark tracker
-    from src.benchmark_tracker import BrierBenchmarkTracker
+    # 1. Ingest projections and actuals into benchmark tracker, per league
+    from src.benchmark_tracker import BrierBenchmarkTracker, LEAGUES
     tracker = BrierBenchmarkTracker()
-    
-    # Auto-populate projections from matchup cache if not already recorded
-    mask = (tracker.history['season'] == tracker.season) & (tracker.history['week'] == week_completed)
-    if not mask.any():
-        matchup_file = os.path.join(CACHE_DIR, f'yahoo_week{week_completed}_all_matchups_mafia.json')
-        if not os.path.exists(matchup_file):
-            matchup_file = os.path.join(CACHE_DIR, f'yahoo_week{week_completed}_all_matchups.json')
-        if os.path.exists(matchup_file):
-            with open(matchup_file, 'r') as f:
-                m_list = json.load(f)
-            y_projs = []
-            seen_players = set()
-            for m in m_list:
-                for side in ['team1', 'team2']:
-                    for p in m[side]['starters'] + m[side]['bench']:
-                        pname = p.get('player_name')
-                        if pname and pname not in seen_players:
-                            seen_players.add(pname)
-                            y_projs.append({
-                                'player_name': pname,
-                                'pos': p.get('pos', 'UNK'),
-                                'team': p.get('team', 'UNK'),
-                                'proj_pts': p.get('yahoo_proj', 0.0),
-                                'status': p.get('status')
-                            })
-            if y_projs:
-                tracker.record_weekly_projections(week_completed, y_projs)
 
-    # Check for actuals feed or local boxscore cache
-    actuals_file = os.path.join(CACHE_DIR, f'actuals_week_{week_completed}.json')
-    if os.path.exists(actuals_file):
-        with open(actuals_file, 'r') as f:
-            actuals_dict = json.load(f)
-        tracker.record_weekly_actuals(week_completed, actuals_dict)
-        print(f"Logged actual scores for Week {week_completed}.")
-    else:
-        print(f"Note: {actuals_file} not yet populated. Ingesting from NFL boxscore feed...")
+    # Refresh the completed week's matchup files (final scores) for every league
+    sync_script = os.path.join(BASE_DIR, 'src', 'daily_yahoo_sync.py')
+    res = subprocess.run([sys.executable, sync_script, '--week', str(week_completed)], capture_output=True, text=True)
+    print(res.stdout.strip()[-2000:])
 
-    # 2. Print evaluation scorecard
-    rep = tracker.generate_evaluation_report(week=week_completed)
-    print("\n--- MODEL SCORECARD (NN vs Yahoo) ---")
-    print(json.dumps(rep, indent=2))
+    for league in LEAGUES:
+        tracker.ingest_matchup_file(week_completed, league)
+
+    # 2. Print evaluation scorecard per league
+    for league in LEAGUES:
+        rep = tracker.generate_evaluation_report(week=week_completed, league=league)
+        print(f"\n--- MODEL SCORECARD (NN vs Yahoo) [{league}] ---")
+        print(json.dumps(rep, indent=2, default=str))
     
     # 3. Fine-tune the Neural Network with updated 2026 season rolling stats
     print(f"\n--- FINE-TUNING NEURAL NETWORK WITH RECENT ACTUALS ---")

@@ -9,6 +9,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
 from src.yahoo_reader import YahooFantasyReader
+from src.config import standardize_team
 
 CACHE_DIR = os.path.join(BASE_DIR, 'data', 'cache')
 COOKIE_PATH = os.path.join(BASE_DIR, 'cookie.txt')
@@ -38,6 +39,41 @@ def clean_player_raw(raw):
     m_opp = re.search(r'(Mon|Sun|Thu)\s*[\d:]+\s*(?:am|pm)\s*[@vs]+\s*([A-Z]+)', raw)
     opp = m_opp.group(0) if m_opp else ''
     
+    return name, pos, team, opp, status
+
+INJURY_CODES = {'Q', 'D', 'O', 'IR', 'PUP', 'SUSP', 'NA', 'IR-R', 'NFI', 'COV'}
+
+def parse_player_cell(td):
+    """
+    Parse a Yahoo matchup player <td> using its structured elements:
+      a.name            -> player name
+      span.Fz-xxs       -> "Dal - RB" (team - position)
+      span.F-injury     -> injury code (Q, D, O, IR, ...)
+    Falls back to the legacy text regex if the cell has no a.name (e.g. empty slot).
+    """
+    raw = td.get_text(strip=True)
+    name_el = td.select_one('a.name')
+    if not name_el:
+        return clean_player_raw(raw) if raw else ('', 'UNK', 'UNK', '', None)
+
+    name = name_el.get_text(strip=True)
+
+    team, pos = 'UNK', 'UNK'
+    for tp_el in td.select('span.Fz-xxs'):
+        m = re.match(r'^\s*([A-Za-z]{2,3})\s*-\s*([A-Z,]+)', tp_el.get_text(strip=True))
+        if m:
+            team = standardize_team(m.group(1).upper())
+            pos = m.group(2).split(',')[0].upper()
+            break
+
+    status = None
+    inj_el = td.select_one('.F-injury')
+    if inj_el:
+        code = inj_el.get_text(strip=True).upper()
+        status = code if code in INJURY_CODES else None
+
+    m_opp = re.search(r'(Mon|Sun|Thu|Sat|Fri)\s*[\d:]+\s*(?:am|pm)\s*[@vs]+\s*([A-Z][A-Za-z]+)', raw)
+    opp = m_opp.group(0) if m_opp else ''
     return name, pos, team, opp, status
 
 def fetch_and_parse_matchup(reader, url, idx):
@@ -89,20 +125,19 @@ def fetch_and_parse_matchup(reader, url, idx):
         table = soup.find('table', id=table_id)
         if not table: return
         for r in table.find_all('tr')[1:]:
-            tds = [td.get_text(strip=True) for td in r.find_all('td')]
+            td_els = r.find_all('td')
+            tds = [td.get_text(strip=True) for td in td_els]
             if len(tds) >= 10:
                 slot = tds[4]
                 if slot == 'Total': continue
-                p1_raw = tds[1]
                 p1_proj = float(tds[2]) if tds[2] and tds[2] != '–' else 0.0
                 p1_actual = float(tds[3]) if len(tds) > 3 and tds[3] and tds[3] != '–' else None
                 
                 p2_actual = float(tds[7]) if len(tds) > 7 and tds[7] and tds[7] != '–' else None
                 p2_proj = float(tds[8]) if tds[8] and tds[8] != '–' else 0.0
-                p2_raw = tds[9]
                 
-                p1_name, p1_pos, p1_team, p1_opp, p1_status = clean_player_raw(p1_raw)
-                p2_name, p2_pos, p2_team, p2_opp, p2_status = clean_player_raw(p2_raw)
+                p1_name, p1_pos, p1_team, p1_opp, p1_status = parse_player_cell(td_els[1])
+                p2_name, p2_pos, p2_team, p2_opp, p2_status = parse_player_cell(td_els[9])
                 
                 final_slot = 'BN' if is_bench else slot
                 if p1_name:
@@ -131,7 +166,7 @@ def fetch_and_parse_matchup(reader, url, idx):
         'team2': {'name': t2_name, 'orig_proj': t2_proj_total, 'actual_total': t2_actual_total, 'starters': t2_starters, 'bench': t2_bench}
     }
 
-def sync_all(target_week=None):
+def sync_all(target_week=None, league=None):
     if not os.path.exists(COOKIE_PATH):
         print(f"Error: {COOKIE_PATH} not found.")
         return False
@@ -140,6 +175,8 @@ def sync_all(target_week=None):
         cookie_str = f.read().strip()
         
     for l in LEAGUES:
+        if league and l['config'] != league:
+            continue
         print(f"\n--- Syncing League {l['id']} ({l['config']}) Week {target_week or 'current'} ---")
         reader = YahooFantasyReader(league_id=l['id'], cookie_string=cookie_str)
         base_url = reader.get_league_base_url()
@@ -187,7 +224,8 @@ def sync_all(target_week=None):
             json.dump(all_matchups, f, indent=2)
         print(f"Saved {len(all_matchups)} matchups to {out_path}")
         
-        if l['config'] == 'mafia':
+        # Only a current-week sync should drive the Matchup Hub; back-filling a past week must not clobber it
+        if l['config'] == 'mafia' and target_week is None:
             main_path = os.path.join(CACHE_DIR, "yahoo_week1_all_matchups.json")
             with open(main_path, 'w') as f:
                 json.dump(all_matchups, f, indent=2)
@@ -203,5 +241,6 @@ def sync_all(target_week=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Yahoo League Sync")
     parser.add_argument('--week', type=int, default=None, help='Target week to fetch (e.g. 5)')
+    parser.add_argument('--league', choices=[l['config'] for l in LEAGUES], default=None, help='Only sync this league')
     args = parser.parse_args()
-    sync_all(target_week=args.week)
+    sync_all(target_week=args.week, league=args.league)
