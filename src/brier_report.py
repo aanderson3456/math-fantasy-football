@@ -44,10 +44,11 @@ DEFAULT_SIGMA = 7.0
 MIN_RESID = 25
 BOOM_PCTL = 70
 
-SOURCES = ['yahoo', 'nn_season_old', 'nn_season_new', 'nn_weekly', 'blend']
+SOURCES = ['yahoo', 'nn_season_old', 'nn_season_new', 'nn_weekly', 'nn_weekly_cal', 'blend']
 LABELS = {'yahoo': 'Yahoo', 'nn_season_old': 'NN season (old)', 'nn_season_new': 'NN season (retrained)',
           'nn_weekly': 'NN weekly (two-branch)', 'nn_weekly_learned': 'NN weekly, learned σ',
-          'blend': 'NN weekly + Yahoo blend'}
+          'nn_weekly_cal': 'NN weekly, calibrated', 'blend': 'NN weekly + Yahoo blend'}
+CAL_SHRINK = 50
 WF_EPOCHS = 34  # epoch count chosen by early stopping when the base model was trained
 
 
@@ -160,6 +161,17 @@ def run(weeks, walk_forward=False):
         ev = d[d.pos.isin(POSITIONS) & d.actual.notna() & (d.yahoo > 0)].drop_duplicates(['week', 'player_name'])
         ev = ev.dropna(subset=['nn_weekly', 'nn_season_old', 'nn_season_new'])
 
+        # Calibrated weekly NN: add each position's mean miss on rostered players from earlier
+        # weeks (shrunk toward 0 by CAL_SHRINK pseudo-rows). Corrects the "rostered players beat
+        # the all-players average" selection bias without peeking at the week being scored.
+        offsets = {}
+        for w in sorted(d.week.unique()):
+            past = ev[ev.week < w]
+            offsets[w] = {p: float((g.actual - g.nn_weekly).sum() / (len(g) + CAL_SHRINK)) for p, g in past.groupby('pos')}
+        off_d = np.array([offsets[w].get(p, 0.0) for w, p in zip(d.week, d.pos)])
+        d['nn_weekly_cal'] = np.where(d['nn_weekly'].notna() & (d['yahoo'] > 0), (d['nn_weekly'] + off_d).clip(lower=0), d['nn_weekly'])
+        ev['nn_weekly_cal'] = (ev['nn_weekly'] + np.array([offsets[w].get(p, 0.0) for w, p in zip(ev.week, ev.pos)])).clip(lower=0)
+
         # NN + Yahoo blend: weight on the NN fit by least squares on earlier weeks only
         alphas = {}
         for w in sorted(d.week.unique()):
@@ -242,6 +254,7 @@ def run(weeks, walk_forward=False):
         report[league] = {'weeks': sorted(int(w) for w in ev.week.unique()), 'player_weeks': int(len(ev)),
                           'matchups': int(len(md)), 'boom_thresholds': {k: round(v, 2) for k, v in thresholds.items()},
                           'blend_nn_weight_by_week': {int(k): round(v, 3) for k, v in alphas.items()},
+                          'calibration_offsets_by_week': {int(k): {p: round(o, 2) for p, o in v.items()} for k, v in offsets.items()},
                           'player': player, 'by_position': by_pos, 'by_week': by_week, 'matchup': matchup}
     return report
 

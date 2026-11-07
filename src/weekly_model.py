@@ -44,9 +44,11 @@ from src.scoring import STAT_COMPONENTS, LEAGUES, harmonize_stats, league_points
 
 MODEL_DIR = os.path.join(CACHE_DIR, 'weekly_model')
 POSITIONS = ['QB', 'RB', 'WR', 'TE']
-USAGE = ['attempts', 'carries', 'targets']
+USAGE = ['attempts', 'carries', 'targets', 'snap_pct']
 TRACK = STAT_COMPONENTS + USAGE
 DEF_PRIOR_GAMES = 4.0  # shrink opponent strength toward last season's value with this many pseudo-games
+INJ_OUT = {'Out', 'Doubtful'}
+RECENT_WEEKS = 3  # a teammate only "vacates" usage if he played within this many weeks
 
 
 def normalize_name(name):
@@ -72,14 +74,46 @@ def load_games_log():
     g['name'] = g['player_display_name'].fillna(g['player_name']).fillna('Unknown')
     g['team'] = g['recent_team'].map(standardize_team)
     g['opp'] = g['opponent_team'].map(standardize_team)
-    for c in USAGE:
-        g[c] = g[c].fillna(0.0).astype(float)
     g['season'] = g['season'].astype('int64')
     g['week'] = g['week'].astype('int64')
+    g = g.merge(load_snaps(), on=['player_id', 'season', 'week'], how='left')  # NaN before 2012
+    for c in USAGE:
+        if c != 'snap_pct':
+            g[c] = g[c].fillna(0.0).astype(float)
     g['t'] = g['season'] * 100 + g['week']
     g = g.drop_duplicates(['player_id', 't']).sort_values(['player_id', 't']).reset_index(drop=True)
     g['pts_mafia'] = league_points(g, 'mafia')
     return g[['player_id', 'name', 'position', 'season', 'week', 't', 'team', 'opp'] + TRACK + ['pts_mafia']]
+
+
+def load_snaps():
+    """Offensive snap share per player-game (nflverse snap_counts, 2012+), keyed by gsis player_id."""
+    import glob
+    files = sorted(glob.glob(os.path.join(CACHE_DIR, 'snap_counts_*.parquet')))
+    if not files:
+        return pd.DataFrame(columns=['player_id', 'season', 'week', 'snap_pct'])
+    s = pd.concat([pd.read_parquet(f, columns=['season', 'game_type', 'week', 'pfr_player_id', 'offense_pct']) for f in files])
+    s = s[s['game_type'] == 'REG']
+    ids = pd.read_parquet(os.path.join(CACHE_DIR, 'nfl_players.parquet'), columns=['gsis_id', 'pfr_id']).dropna().drop_duplicates('pfr_id')
+    s = s.merge(ids, left_on='pfr_player_id', right_on='pfr_id', how='inner')
+    s = s.rename(columns={'gsis_id': 'player_id', 'offense_pct': 'snap_pct'})
+    s['season'] = s['season'].astype('int64')
+    s['week'] = s['week'].astype('int64')
+    return s.groupby(['player_id', 'season', 'week'], as_index=False)['snap_pct'].max()
+
+
+def load_injuries():
+    """Official weekly injury reports (nflverse, 2009+): one row per listed player-week."""
+    import glob
+    files = sorted(glob.glob(os.path.join(CACHE_DIR, 'injuries_*.parquet')))
+    if not files:
+        return pd.DataFrame(columns=['player_id', 'season', 'week', 'team', 'report_status', 'practice_status'])
+    i = pd.concat([pd.read_parquet(f, columns=['season', 'game_type', 'week', 'team', 'gsis_id', 'report_status', 'practice_status']) for f in files])
+    i = i[i['game_type'] == 'REG'].rename(columns={'gsis_id': 'player_id'}).dropna(subset=['player_id'])
+    i['team'] = i['team'].map(standardize_team)
+    i['season'] = i['season'].astype('int64')
+    i['week'] = i['week'].astype('int64')
+    return i.drop_duplicates(['player_id', 'season', 'week'], keep='last')
 
 
 def load_vegas():
@@ -101,11 +135,29 @@ def load_vegas():
 # Features
 # ----------------------------------------------------------------------------------------
 class FeatureBuilder:
-    def __init__(self, games, vegas):
+    def __init__(self, games, vegas, injuries=None):
         self.g = games
         self.vegas = vegas
+        self.inj = injuries if injuries is not None else load_injuries()
         self._build_player_state()
         self._build_defense_state()
+        self._build_vacated()
+
+    def _build_vacated(self):
+        """
+        Per team-week usage freed up by Out/Doubtful teammates on the official injury report:
+        each listed player's pre-game EWM targets / carries / pass attempts, counted only if he
+        played for that team within RECENT_WEEKS (long-absent players are already in form stats).
+        """
+        inj = self.inj[self.inj['report_status'].isin(INJ_OUT)][['player_id', 'season', 'week', 'team']].copy()
+        inj['t'] = inj['season'] * 100 + inj['week']
+        ps = self.player_state[['player_id', 't', 'st_season', 'st_week', 'last_team',
+                                'ewm_targets', 'ewm_carries', 'ewm_attempts']].sort_values('t')
+        v = pd.merge_asof(inj.sort_values('t'), ps, on='t', by='player_id', allow_exact_matches=False, direction='backward')
+        gap = np.where(v['st_season'] == v['season'], v['week'] - v['st_week'], 18 - v['st_week'] + v['week'])
+        v = v[(gap <= RECENT_WEEKS) & (v['last_team'] == v['team'])]
+        self.vacated = v.groupby(['season', 'week', 'team'], as_index=False)[['ewm_targets', 'ewm_carries', 'ewm_attempts']].sum() \
+            .rename(columns={'ewm_targets': 'vac_targets', 'ewm_carries': 'vac_carries', 'ewm_attempts': 'vac_attempts'})
 
     def _build_player_state(self):
         g = self.g
@@ -180,6 +232,21 @@ class FeatureBuilder:
 
         x = x.merge(self.vegas[['season', 'week', 'team', 'is_home', 'implied_total', 'team_spread']],
                     on=['season', 'week', 'team'], how='left')
+
+        # Injury report: own designation + usage vacated by Out/Doubtful teammates
+        own = self.inj[['player_id', 'season', 'week', 'report_status', 'practice_status']]
+        x = x.merge(own, on=['player_id', 'season', 'week'], how='left')
+        x['own_q'] = (x['report_status'] == 'Questionable').astype(float)
+        x['own_d'] = x['report_status'].isin(INJ_OUT).astype(float)
+        ps = x['practice_status'].fillna('').str.lower()
+        x['own_dnp'] = ps.str.contains('did not').astype(float)
+        x['own_limited'] = ps.str.contains('limited').astype(float)
+        x = x.merge(self.vacated, on=['season', 'week', 'team'], how='left')
+        for c, own_c in [('vac_targets', 'ewm_targets'), ('vac_carries', 'ewm_carries'), ('vac_attempts', 'ewm_attempts')]:
+            # A listed player who still plays shouldn't count his own usage as vacated
+            recent = x['weeks_since_last'] <= RECENT_WEEKS / 20.0
+            x[c] = (x[c].fillna(0.0) - np.where(x['own_d'].eq(1) & recent, x[own_c].fillna(0.0), 0.0)).clip(lower=0.0)
+        x['snap_known'] = x['ewm_snap_pct'].notna().astype(float)
         x['is_home'] = x['is_home'].fillna(0.5)
         x['implied_total'] = x['implied_total'].fillna(22.0) / 30.0
         x['team_spread'] = x['team_spread'].fillna(0.0) / 10.0
@@ -198,7 +265,8 @@ class FeatureBuilder:
         for pre in ['ewm', 'r8', 'std', 'prev']:
             cols += [f'{pre}_{c}' for c in TRACK]
         cols += ['n_season', 'log_career', 'has_history', 'has_prev', 'weeks_since_last', 'changed_team',
-                 'opp_ratio', 'is_home', 'implied_total', 'team_spread', 'week_frac']
+                 'opp_ratio', 'is_home', 'implied_total', 'team_spread', 'week_frac',
+                 'own_q', 'own_d', 'own_dnp', 'own_limited', 'vac_targets', 'vac_carries', 'vac_attempts', 'snap_known']
         cols += [f'pos_{p}' for p in POSITIONS]
         return cols
 
@@ -291,7 +359,7 @@ class WeeklyModel:
         if through_week is not None:
             mask &= ~((g['season'] == through_season) & (g['week'] > through_week))
         q = g[mask & (g['season'] >= 2007)][['player_id', 'position', 'season', 'week', 'team', 'opp'] + STAT_COMPONENTS]
-        x = self.fb.build(q[['player_id', 'position', 'season', 'week', 'team', 'opp']])
+        x = self.fb.build(q[['player_id', 'position', 'season', 'week', 'team', 'opp']]).copy()
         x[STAT_COMPONENTS] = q[STAT_COMPONENTS].values
         return x
 
